@@ -1,0 +1,78 @@
+version: "3.8"
+services:
+  # 1. ZK quorum
+  zookeeper:
+    image: zookeeper:3.9.2
+    restart: always
+    volumes:
+      - zk-logs:/logs
+      - zk-data:/data
+      - zk-datalog:/datalog
+
+  # 2. Storm Nimbus
+  nimbus:
+    image: storm:2.7.0
+    command: storm nimbus
+    depends_on: [ zookeeper ]
+    restart: always
+    volumes:
+      - storm-nimbus-logs:/logs
+
+  # 3. Storm Supervisor(s)
+  supervisor:
+    image: storm:2.7.0
+    command: storm supervisor
+    depends_on: [ nimbus, zookeeper ]
+    restart: always
+    volumes:
+      - storm-supervisor-logs:/logs
+    deploy:
+      replicas: 2            # scale out!
+
+  # 4. Storm UI
+  ui:
+    image: storm:2.7.0
+    command: storm ui
+    depends_on: [ nimbus ]
+    ports: ["8080:8080"]
+    restart: always
+    volumes:
+      - storm-ui-logs:/logs
+
+  # 5. URL Frontier (gRPC + RocksDB)
+  frontier:
+    image: crawlercommons/url-frontier
+    command: rocksdb.path=/crawldir/rocksdb
+    ports: ["7071:7071"]
+    volumes:
+      - ./frontier:/crawldir
+
+  # 6. OpenSearch (replacing Elasticsearch)
+  opensearch:
+    image: opensearchproject/opensearch:2.5.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - network.host=0.0.0.0
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+
+  # 7. Runner: builds & submits your topology
+  runner:
+    build: .
+    depends_on: [ nimbus, frontier ]
+    volumes:
+      - "./crawldata:/home/storm/crawldata"
+    tty: true
+
+volumes:
+  zk-logs:
+  zk-data:
+  zk-datalog:
+  storm-nimbus-logs:
+  storm-supervisor-logs:
+  storm-ui-logs:
+  opensearch-data:

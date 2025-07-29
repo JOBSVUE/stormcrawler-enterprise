@@ -1,0 +1,12 @@
+# Elasticsearch cluster settings
+es.status.mapping: status
+es.index.mapping: crawler
+es.indexing.document.id: metadata.url
+es.indexing.document.parent: metadata.domain
+es.indexing.bulk.size: 100
+es.indexing.bulk.interval.ms: 2000
+
+# ES hosts (Docker network)
+es.hosts:
+  - host: "elasticsearch"
+    port: 9200
