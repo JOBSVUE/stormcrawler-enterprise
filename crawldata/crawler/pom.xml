@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.example</groupId>
+  <artifactId>stormcrawler-example</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>StormCrawler Example</name>
+  <description>Example web crawler using StormCrawler</description>
+
+  <properties>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <stormcrawler.version>2.10</stormcrawler.version>
+    <storm.version>2.7.0</storm.version>
+    <elasticsearch.version>7.10.2</elasticsearch.version>
+  </properties>
+
+  <dependencies>
+    <!-- StormCrawler Core -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-core</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+
+    <!-- StormCrawler Elasticsearch -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-elasticsearch</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+
+    <!-- Apache Storm -->
+    <dependency>
+      <groupId>org.apache.storm</groupId>
+      <artifactId>storm-core</artifactId>
+      <version>${storm.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.storm</groupId>
+      <artifactId>storm-client</artifactId>
+      <version>${storm.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Flux for YAML-based topology definition -->
+    <dependency>
+      <groupId>org.apache.storm</groupId>
+      <artifactId>flux-core</artifactId>
+      <version>${storm.version}</version>
+    </dependency>
+
+
+
+    <!-- JSoup for HTML parsing -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.14.3</version>
+    </dependency>
+
+    <!-- SLF4J for logging -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>1.7.32</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.7.32</version>
+    </dependency>
+
+    <!-- Testing -->
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <repositories>
+    <!-- Maven Central (default) -->
+    <repository>
+      <id>central</id>
+      <url>https://repo.maven.apache.org/maven2/</url>
+    </repository>
+
+    <!-- Clojars over HTTPS -->
+    <repository>
+      <id>clojars</id>
+      <url>https://repo.clojars.org/</url>
+      <releases><enabled>true</enabled></releases>
+      <snapshots><enabled>true</enabled></snapshots>
+    </repository>
+
+    <!-- (Optional) Apache Storm releases -->
+    <repository>
+      <id>apache-storm</id>
+      <name>Apache Storm Releases</name>
+      <url>https://repository.apache.org/content/repositories/releases/</url>
+      <releases><enabled>true</enabled></releases>
+      <snapshots><enabled>false</enabled></snapshots>
+    </repository>
+
+
+  </repositories>
+
+
+
+  <build>
+    <sourceDirectory>src/main/java</sourceDirectory>
+    <testSourceDirectory>src/test/java</testSourceDirectory>
+
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+    </resources>
+
+    <plugins>
+      <!-- Compiler -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.8.1</version>
+        <configuration>
+          <source>11</source>
+          <target>11</target>
+        </configuration>
+      </plugin>
+
+      <!-- Shade -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.2.4</version>
+        <configuration>
+          <createDependencyReducedPom>false</createDependencyReducedPom>
+          <filters>
+            <filter>
+              <artifact>*:*</artifact>
+              <excludes>
+                <exclude>META-INF/*.SF</exclude>
+                <exclude>META-INF/*.DSA</exclude>
+                <exclude>META-INF/*.RSA</exclude>
+              </excludes>
+            </filter>
+          </filters>
+
+          <transformers>
+            <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+            <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+              <mainClass>org.apache.storm.flux.Flux</mainClass>
+            </transformer>
+          </transformers>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Exec for local runs -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.0.0</version>
+        <executions>
+          <execution>
+            <id>run-local</id>
+            <configuration>
+              <mainClass>org.apache.storm.flux.Flux</mainClass>
+              <arguments>
+                <argument>--local</argument>
+                <argument>crawl.flux</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,79 @@
+nimbus.seeds:
+  - "nimbus"
+nimbus.thrift.port: 6627
+
+es.indexer.addresses: "localhost:9200"
+es.indexer.index.name: "content"
+es.indexer.doc.type: "_doc"
+es.indexer.create: false
+es.indexer.settings:
+  cluster.name: "elasticsearch"
+
+es.status.addresses: "localhost:9200"
+es.status.index.name: "status"
+es.status.doc.type: "_doc"
+es.status.routing: true
+es.status.routing.fieldname: "metadata.hostname"
+
+http.agent.name: "StormCrawler"
+http.agent.version: "1.0"
+http.agent.description: "Web crawler built with StormCrawler"
+http.agent.url: "http://example.com"
+http.agent.email: "crawler@example.com"
+
+fetcher.threads.number: 50
+fetcher.server.delay: 1.0
+fetcher.server.min.delay: 0.0
+fetcher.max.crawl.delay: 30
+
+http.timeout: 10000
+http.content.limit: 65536
+http.store.responsetime: true
+http.skip.robots: false
+
+parsefilters.config.file: "parsefilters.json"
+urlfilters.config.file: "urlfilters.json"
+
+spout.absolutepath: true
+fileSpout.dir: "."
+fileSpout.file: "seeds.txt"
+
+status.updater.cache.spec: "maximumSize=500000,expireAfterAccess=1h"
+status.updater.use.cache: true
+
+scheduler.class: "com.digitalpebble.stormcrawler.persistence.DefaultScheduler"
+status.updater.unit.round.date: "SECONDS"
+
+topology.metrics.consumer.register:
+  - class: "com.digitalpebble.stormcrawler.elasticsearch.metrics.MetricsConsumer"
+    parallelism.hint: 1
+    argument:
+      es.metrics.addresses: "localhost:9200"
+      es.metrics.index.name: "metrics"
+
+urlfilters:
+  - class: "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter"
+    name: "RegexURLFilter"
+    params:
+      file: "urlfilters.json"
+
+parsefilters:
+  - class: "com.digitalpebble.stormcrawler.parse.filter.ContentFilter"
+    name: "ContentFilter"
+    params:
+      pattern: "//DIV[@id=\"maincontent\"]"
+      key: "content"
+  - class: "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter"
+    name: "LinkParseFilter"
+    params:
+      pattern: "//A[@href]"
+      key: "links"
+  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
+    name: "XPathFilter"
+    params:
+      - key: "title"
+        pattern: "//TITLE"
+      - key: "description"
+        pattern: "//META[@name=\"description\"]/@content"
+      - key: "keywords"
+        pattern: "//META[@name=\"keywords\"]/@content"

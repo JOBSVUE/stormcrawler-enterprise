@@ -1,0 +1,10 @@
+{
+  "com.digitalpebble.stormcrawler.parse.filter.ContentFilter": {
+    "pattern": "//DIV[@id=\"maincontent\"]",
+    "key": "content"
+  },
+  "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter": {
+    "pattern": "//A[@href]",
+    "key": "links"
+  }
+}
