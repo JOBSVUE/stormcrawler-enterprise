@@ -1,34 +1,86 @@
+version: "3.8"
+
 services:
+  # ------------------------
+  # Oracle test container
+  # ------------------------
+  oracle-test:
+    image: gvenzl/oracle-xe:18.4.0-slim
+    container_name: oracle-test
+    environment:
+      # Sets SYS and SYSTEM passwords; init.sql will create your user
+      ORACLE_PASSWORD: "bjnSY55l0g1IrzWY71Jg"
+    ports:
+      - "1521:1521"
+    volumes:
+      # Use the simpler initialization script
+      - ./oracle-init/init.sql:/container-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - |
+          echo 'SELECT 1 FROM DUAL;' |
+          sqlplus -s SYS/bjnSY55l0g1IrzWY71Jg@//localhost:1521/XE as sysdba |
+          grep -q 1
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ------------------------
+  # Zookeeper
+  # ------------------------
   zookeeper:
     image: zookeeper:3.9.2
     container_name: zookeeper
     restart: always
+    ports:
+      - "2181:2181"
     volumes:
       - zk-logs:/logs
       - zk-data:/data
       - zk-datalog:/datalog
 
+  # ------------------------
+  # Nimbus (Storm master)
+  # ------------------------
   nimbus:
     image: storm:2.7.0
     container_name: nimbus
     command: storm nimbus
     depends_on:
       - zookeeper
+      - elasticsearch
     restart: always
+    environment:
+      - STORM_OPTS=-Dlog4j2.formatMsgNoLookups=true
     volumes:
       - storm-nimbus-logs:/logs
+      # mount your verbose log4j2.properties here if needed
+      - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/cluster.log4j2.properties
 
+  # ------------------------
+  # Supervisor (Storm workers)
+  # ------------------------
   supervisor:
     image: storm:2.7.0
     container_name: supervisor
-    command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
+    command: storm supervisor -c worker.childopts="-Xmx%HEAP-MEM%m -Dlog4j2.formatMsgNoLookups=true"
     depends_on:
       - nimbus
       - zookeeper
+      - elasticsearch
     restart: always
+    environment:
+      - STORM_OPTS=-Dlog4j2.formatMsgNoLookups=true
     volumes:
       - storm-supervisor-logs:/logs
+      - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/worker.log4j2.properties
 
+  # ------------------------
+  # Storm UI
+  # ------------------------
   ui:
     image: storm:2.7.0
     container_name: ui
@@ -36,19 +88,67 @@ services:
     depends_on:
       - nimbus
     restart: always
+    environment:
+      - STORM_OPTS=-Dlog4j2.formatMsgNoLookups=true
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080" # Updated to remove localhost binding for broader accessibility
     volumes:
       - storm-ui-logs:/logs
+      - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/ui.log4j2.properties
 
+  # ------------------------
+  # Elasticsearch
+  # ------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.7
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+      - cluster.name=stormcrawler
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -s
+        - http://localhost:9200/_cluster/health?wait_for_status=green
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ------------------------
+  # Storm "runner" for submitting topologies
+  # ------------------------
   runner:
     image: digitalpebble/storm_maven:2.7.0
     container_name: runner
     depends_on:
       - nimbus
+      - elasticsearch
+      - oracle-test
+    environment:
+      - MAVEN_REPO_LOCAL=/crawldata/.repository
+      # Oracle connection credentials as environment variables
+      - JDBC_URL=jdbc:oracle:thin:@//oracle-test:1521/XE
+      - JDBC_USER=c##mojtaba
+      - JDBC_PASS=bjnSY55l0g1IrzWY71Jg
+      - JAVA_OPTS=-Dlog4j2.formatMsgNoLookups=true -Dlog4j.configurationFile=log4j2.properties
+      - STORM_OPTS=-Dlog4j2.formatMsgNoLookups=true -Dlog4j.configurationFile=log4j2.properties
     volumes:
-      - "./crawldata:/crawldata"
+      - ./crawldata:/crawldata
+      - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/worker.log4j2.properties
+    command: >
+      bash -c "/crawldata/submit-topology.sh"
 
+  # ------------------------
+  # Frontier (if you still need it)
+  # ------------------------
   frontier:
     image: crawlercommons/url-frontier
     container_name: frontier
@@ -59,11 +159,17 @@ services:
       - ./frontier:/crawldir
 
 volumes:
-  opensearch-data1:
-  opensearch-data2:
+  oracle-data:
+  es-data:
   storm-ui-logs:
   storm-nimbus-logs:
   storm-supervisor-logs:
   zk-logs:
   zk-data:
   zk-datalog:
+  es_data:
+    driver: local
+
+networks:
+  stormcrawler-net:
+    driver: bridge

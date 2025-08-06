@@ -1,1 +1,4 @@
-com/example/crawler/CrawlTopology.class
+com/digitalpebble/DebugBolt.class
+com/digitalpebble/SQLStatusUpdaterBolt.class
+com/digitalpebble/SimpleOracleSpout.class
+com/digitalpebble/SQLStatusUpdaterBolt$1.class

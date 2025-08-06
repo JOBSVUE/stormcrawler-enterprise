@@ -1,0 +1,78 @@
+# Custom configuration for StormCrawler
+# This is used to override the default values from the core configuration
+
+config:
+  # Topology-wide configuration
+  topology.workers: 1
+  topology.message.timeout.secs: 300
+  topology.max.spout.pending: 100
+  topology.debug: false
+
+  # General StormCrawler settings
+  parser.emitOutlinks: true
+  urlfilter.refreshConfigurationInBolt: true
+  
+  # User agent configuration
+  http.agent.name: "StormCrawler Enterprise"
+  http.agent.version: "1.0"
+  http.agent.description: "Enterprise web crawler"
+  http.agent.url: "https://example.org/"
+  http.agent.email: "someone@example.org"
+
+  # Fetcher behavior
+  fetcher.server.delay: 1.0
+  fetcher.max.urls.in.queues: 100
+  fetcher.threads.number: 10
+  fetcher.threads.per.queue: 1
+  fetcherbolt.queue.debug.name: "fetcher-queue-debug"
+
+  # Parsing behavior
+  jsoup.treat.non.html.as.error: true
+  parser.emitOutlinks.max.per.page: 100
+  parser.robots.nofollow: true
+  
+  # Status storage
+  status.updater.cache.spec: "maximumSize=10000,expireAfterAccess=1h"
+
+  # Elasticsearch specific configuration 
+  es.indexer.addresses: "elasticsearch:9200"
+  es.status.addresses: "elasticsearch:9200"
+  es.status.index.name: "status"
+  es.status.doc.type: "status"
+  es.status.create: true
+  es.status.routing: true
+  es.status.routing.fieldname: "metadata.hostname"
+  es.metrics.addresses: "elasticsearch:9200"
+  es.metrics.index.name: "metrics"
+  es.metrics.doc.type: "datapoint"
+  es.metrics.period: 30
+  
+  # Content specific configuration
+  es.index.name: "content"
+  es.doc.type: "doc"
+  es.generate.timestamp: false
+  
+  # Input parsing configuration
+  sitemap.discovery: true
+  parsefilters.config.file: "parsefilters.json"
+  urlfilters.config.file: "urlfilters.json"
+  
+  # Protocol implementation
+  http.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
+  https.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
+  
+  # SQL Database configuration for custom status updater
+  sql.connection.string: "jdbc:oracle:thin:@//oracle-test:1521/XE"
+  sql.user: "c##mojtaba"
+  sql.password: "bjnSY55l0g1IrzWY71Jg"
+  sql.status.table: "crawl_queue"
+  sql.show.sql: true
+  sql.max.retries: 3
+  sql.retry.interval.ms: 2000
+  
+  # Metrics consumers
+  topology.metrics.consumer.register:
+    - class: "org.apache.storm.metric.LoggingMetricsConsumer"
+      parallelism.hint: 1
+    - class: "com.digitalpebble.stormcrawler.elasticsearch.metrics.MetricsConsumer"
+      parallelism.hint: 1

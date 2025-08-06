@@ -1,69 +1,92 @@
+# StormCrawler Oracle Configuration
+
+# Database connection - use environment variables
+jdbc.url: "jdbc:oracle:thin:@//oracle-test:1521/XE"
+jdbc.user: "c##mojtaba"
+jdbc.pass: "bjnSY55l0g1IrzWY71Jg"
+jdbc.status.table: "crawl_queue"
+jdbc.validate.connection: true
+jdbc.connection.timeout.ms: 30000
+jdbc.max.retries: 3
+jdbc.retry.interval.ms: 2000
+jdbc.fetch.size: 100
+jdbc.batch.size: 50
+
+# SQL status storage configuration
+sql.connection.string: "jdbc:oracle:thin:@//oracle-test:1521/XE"
+sql.user: "c##mojtaba"
+sql.password: "bjnSY55l0g1IrzWY71Jg"
+sql.status.table: "crawl_queue"
+sql.max.retries: 3
+sql.retry.interval.ms: 2000
+sql.show.sql: true
+
+# Oracle specific settings
+oracle.connection.pool.size: 5
+oracle.connection.min.idle: 2
+oracle.connection.max.lifetime: 1800000
+oracle.query.timeout: 30
+
+# Storm / Nimbus settings
 nimbus.seeds:
   - "nimbus"
 nimbus.thrift.port: 6627
+topology.workers: 1
+topology.message.timeout.secs: 300
+topology.max.spout.pending: 100
+topology.debug: true
 
-es.indexer.addresses:
-  - "http://localhost:9200"
-es.indexer.index.name: "content"
-es.indexer.doc.type: "_doc"
-es.indexer.create: false
-es.indexer.settings:
-  cluster.name: "elasticsearch"
-
-es.status.addresses:
-  - "http://localhost:9200"
-es.status.index.name: "status"
-es.status.doc.type: "_doc"
-es.status.routing: true
-es.status.routing.fieldname: "metadata.hostname"
-
-http.agent.name:
-  - "StormCrawler"
-http.agent.version:
-  - "1.0"
-http.agent.description:
-  - "Web crawler built with StormCrawler"
-http.agent.url:
-  - "http://example.com"
-http.agent.email:
-  - "crawler@example.com"
-
-fetcher.threads.number: 50
-fetcher.server.delay: 1.0
-fetcher.server.min.delay: 0.0
-fetcher.max.crawl.delay: 30
-
+# Fetcher configuration
+fetcher.threads.number: 10
+fetcher.server.delay: 2.0
 http.timeout: 10000
 http.content.limit: 65536
+
+# Metadata keys to carry across bolts
+metadata.persist:
+  - fetch.statusCode
+  - depth
+
+# HTTP agent metadata
+http.agent.name:        "oracle-crawler"
+http.agent.version:     "1.0"
+http.agent.description: "StormCrawler with Oracle backend"
+http.agent.url:         "https://example.com"
+http.agent.email:       "admin@example.com"
+
+# URL / parse filters
+urlfilters.config.file:   "urlfilters.json"
+parsefilters.config.file: "parsefilters.json"
+
+# Kryo registrations
+topology.kryo.register:
+  - "com.digitalpebble.stormcrawler.Metadata"
+  - "java.util.Collections$EmptyMap"
+  - "org.apache.storm.shade.net.minidev.json.JSONObject"
+
+# Additional fetcher configs
+fetcher.server.min.delay: 0.0
+fetcher.max.crawl.delay: 30
 http.store.responsetime: true
 http.skip.robots: false
 
-parsefilters.config.file: "parsefilters.json"
-urlfilters.config.file: "urlfilters.json"
+# FileSpout configuration  
+spout.absolutepath: false
+fileSpout.dir: "seeds"
+fileSpout.file: "urls.txt"
 
-spout.absolutepath: true
-fileSpout.dir: "."
-fileSpout.file: "seeds.txt"
-
-status.updater.cache.spec: "maximumSize=500000,expireAfterAccess=1h"
-status.updater.use.cache: true
-
-scheduler.class: "com.digitalpebble.stormcrawler.persistence.DefaultScheduler"
+# Status configuration
 status.updater.unit.round.date: "SECONDS"
+status.updater.class: "com.digitalpebble.stormcrawler.sql.SQLStatusUpdaterBolt"
 
-topology.metrics.consumer.register:
-  - class: "com.digitalpebble.stormcrawler.elasticsearch.metrics.MetricsConsumer"
-    parallelism.hint: 1
-    argument:
-      es.metrics.addresses: "localhost:9200"
-      es.metrics.index.name: "metrics"
-
+# URL Filters
 urlfilters:
   - class: "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter"
     name: "RegexURLFilter"
     params:
       file: "urlfilters.json"
 
+# Parse Filters - cleaned up duplicates
 parsefilters:
   - class: "com.digitalpebble.stormcrawler.parse.filter.ContentFilter"
     name: "ContentFilter"
@@ -75,6 +98,37 @@ parsefilters:
     params:
       pattern: "//A[@href]"
       key: "links"
+  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
+    name: "XPathFilter"
+    params:
+      - key: "title"
+        pattern: "//TITLE"
+      - key: "description"
+        pattern: "//META[@name=\"description\"]/@content"
+      - key: "keywords"
+        pattern: "//META[@name=\"keywords\"]/@content"
+  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
+    name: "XPathFilter"
+    params:
+      - key: "title"
+        pattern: "//TITLE"
+      - key: "description"
+        pattern: "//META[@name=\"description\"]/@content"
+      - key: "keywords"
+        pattern: "//META[@name=\"keywords\"]/@content"
+    name: "LinkParseFilter"
+    params:
+      pattern: "//A[@href]"
+      key: "links"
+  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
+    name: "XPathFilter"
+    params:
+      - key: "title"
+        pattern: "//TITLE"
+      - key: "description"
+        pattern: "//META[@name=\"description\"]/@content"
+      - key: "keywords"
+        pattern: "//META[@name=\"keywords\"]/@content"
   - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
     name: "XPathFilter"
     params:

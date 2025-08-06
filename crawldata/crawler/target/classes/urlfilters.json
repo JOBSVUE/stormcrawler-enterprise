@@ -1,29 +1,23 @@
 {
-  "com.digitalpebble.stormcrawler.filtering.basic.BasicURLFilter": {
-    "maxPathRepetition": 3,
-    "maxLength": 1024
-  },
-  "com.digitalpebble.stormcrawler.filtering.depth.MaxDepthFilter": {
-    "maxDepth": 10
-  },
-  "com.digitalpebble.stormcrawler.filtering.host.HostURLFilter": {
-    "ignoreOutsideHost": false,
-    "ignoreOutsideDomain": true
-  },
-  "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter": {
-    "regexFilters": [
-      {
-        "pattern": ".*\\.(css|js|bmp|gif|jpe?g|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|pdf|rm|smil|wmv|swf|wma|zip|rar|gz)$",
-        "accept": false
-      },
-      {
-        "pattern": ".*\\.html?$",
-        "accept": true
-      },
-      {
-        "pattern": ".*/$",
-        "accept": true
+  "filters": [
+    {
+      "class": "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter",
+      "name": "RegexURLFilter",
+      "params": {
+        "file": "default-regex-filters.txt"
       }
-    ]
-  }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.filtering.basic.BasicURLFilter",
+      "name": "BasicURLFilter",
+      "params": {
+        "maxPathRepetition": 3,
+        "maxLength": 1024
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.filtering.host.HostURLFilter",
+      "name": "HostURLFilter"
+    }
+  ]
 }

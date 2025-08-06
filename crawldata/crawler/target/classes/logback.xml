@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    
+    <!-- Console appender configuration -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- WARN logging for verbose third-party libraries -->
+    <logger name="org.apache.http" level="WARN"/>
+    <logger name="org.apache.zookeeper" level="WARN"/>
+    
+    <!-- INFO level for Elasticsearch to see operations without overwhelming logs -->
+    <logger name="org.elasticsearch" level="INFO"/>
+    <logger name="com.digitalpebble.stormcrawler.elasticsearch" level="DEBUG"/>
+    <logger name="com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt" level="DEBUG"/>
+    
+    <!-- DEBUG logging for all custom components -->
+    <logger name="com.digitalpebble.stormcrawler.bolt.FetcherBolt" level="DEBUG"/>
+    <logger name="com.digitalpebble.stormcrawler.bolt.JSoupParserBolt" level="DEBUG"/>
+    <logger name="com.digitalpebble.SQLStatusUpdaterBolt" level="DEBUG"/>
+    
+    <!-- Enable Storm topology-level debugging -->
+    <logger name="org.apache.storm.daemon.executor" level="INFO"/>
+    <logger name="org.apache.storm.daemon.task" level="INFO"/>
+    
+    <!-- DEBUG logging for parse filter issues -->
+    <logger name="com.digitalpebble.stormcrawler.parse.filter" level="DEBUG"/>
+    <logger name="com.digitalpebble.stormcrawler.jsoup" level="DEBUG"/>
+    
+    <!-- Turn off HikariCP logging -->
+    <logger name="com.zaxxer.hikari" level="OFF"/>
+    
+    <!-- Root logger configuration - required for logback -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>

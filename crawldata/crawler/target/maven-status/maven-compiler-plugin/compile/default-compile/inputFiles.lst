@@ -1,2 +1,4 @@
-/crawldata/crawler/src/main/java/com/example/crawler/CrawlTopology.java
-/crawldata/crawler/src/main/java/com/digitalpebble/CrawlTopology.java
+/crawldata/crawler/src/main/java/com/digitalpebble/DebugBolt.java
+/crawldata/crawler/src/main/java/com/digitalpebble/SQLStatusUpdaterBolt.java
+/crawldata/crawler/src/main/java/com/digitalpebble/ElasticsearchIndexerBolt.java
+/crawldata/crawler/src/main/java/com/digitalpebble/SimpleOracleSpout.java

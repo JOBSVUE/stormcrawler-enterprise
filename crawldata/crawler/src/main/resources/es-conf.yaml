@@ -1,0 +1,51 @@
+# Remove this file if no longer needed.
+# Elasticsearch configuration
+
+config:
+  # Elasticsearch cluster settings
+  es.indexer.addresses: ["http://elasticsearch:9200"]
+  es.indexer.index.name: "content"
+  es.indexer.create: true
+  
+  # Connection and request settings
+  es.indexer.settings:
+    cluster.name: "stormcrawler"
+    client.transport.sniff: false
+    request.headers.Accept: "application/json"
+    request.headers.Content-Type: "application/json"
+  
+  # Bulk indexing settings for performance
+  es.indexer.flushInterval: "5s"
+  es.indexer.bulkActions: 50
+  es.indexer.bulkSize: "5mb"
+  es.indexer.concurrentRequests: 1
+  
+  # Fields mappings - define which metadata to index
+  es.indexer.doc.builder: "com.digitalpebble.stormcrawler.elasticsearch.persistence.DefaultDocumentBuilder"
+  es.indexer.metadata.whitelist:
+    - "fetch.statusCode"
+    - "parse.title"
+    - "parse.keywords"
+    - "parse.description"
+  es.status.routing: true
+  es.status.routing.fieldname: "metadata.hostname"
+  es.status.max.buckets: 50
+  es.status.max.urls.per.bucket: 100
+  es.status.min.delay.queries: 2000
+  
+  # Scripts for sorting the URLs in the status index
+  es.status.sort.field: "nextFetchDate"
+  es.status.sort.order: "asc"
+
+  # Indices lifecycle
+  es.status.settings:
+    index.number_of_shards: 1
+    index.number_of_replicas: 0
+  
+  es.metrics.settings:
+    index.number_of_shards: 1
+    index.number_of_replicas: 0
+  
+  es.indexer.settings:
+    index.number_of_shards: 1
+    index.number_of_replicas: 0

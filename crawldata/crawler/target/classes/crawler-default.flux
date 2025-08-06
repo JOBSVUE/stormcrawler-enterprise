@@ -1,0 +1,160 @@
+name: "crawler"
+
+spouts:
+  - id: "spout"
+    className: "com.digitalpebble.SimpleOracleSpout"
+    parallelism: 1
+
+config:
+  # Elasticsearch configuration for content indexing
+  es.indexer.addresses: ["http://elasticsearch:9200"]
+  es.indexer.index.name: "content"
+  es.indexer.create: true
+  es.indexer.doc.type: "_doc"
+  es.indexer.flushInterval: "5s"
+  es.indexer.bulkActions: 50
+  es.indexer.bulkSize: "5mb"
+  es.indexer.concurrentRequests: 1
+  
+  # Connection settings
+  es.client.connection.timeout: 10000
+  es.client.socket.timeout: 10000
+  es.client.max.connections.per.route: 20
+  es.client.max.connections.total: 100
+  
+  # Index options
+  es.indexer.pipeline: "_none"
+  
+  # Basic crawler configuration
+  topology.workers: 1
+  topology.message.timeout.secs: 300
+  topology.max.spout.pending: 100
+  topology.debug: false
+  
+  # Fetcher configuration
+  fetcher.threads.number: 10
+  fetcher.server.delay: 1.0
+  fetcher.max.crawl.delay: 30
+  
+  # Parser configuration - use jsoupfilters instead of parsefilters
+  jsoupfilters.config.file: "jsoupfilters.json"
+  urlfilters.config.file: "urlfilters.json"
+  
+  # Status updater configuration
+  status.updater.cache.spec: "maximumSize=500000,expireAfterAccess=1h"
+  
+  # Oracle database configuration
+  sql.connection.string: "jdbc:oracle:thin:@//oracle-test:1521/XE"
+  sql.user: "c##mojtaba"
+  sql.password: "bjnSY55l0g1IrzWY71Jg"
+  sql.status.table: "crawl_queue"
+  sql.max.retries: 3
+  sql.retry.interval.ms: 2000
+  sql.show.sql: true
+
+  # User-Agent configuration
+  http.agent.name: "Mozilla/5.0 (compatible; StormCrawler/2.0; +https://stormcrawler.net)"
+  
+  # Elasticsearch configuration
+  es.indexer.addresses: ["http://elasticsearch:9200"]
+  es.indexer.index.name: "content"
+  es.indexer.create: true
+  
+  # Crawler config
+  http.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
+  https.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
+
+bolts:
+  - id: "partitioner"
+    className: "com.digitalpebble.stormcrawler.bolt.URLPartitionerBolt"
+    parallelism: 1
+
+  - id: "fetcher" 
+    className: "com.digitalpebble.stormcrawler.bolt.FetcherBolt"
+    parallelism: 1
+    
+  - id: "sitemap"
+    className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"  
+    parallelism: 1
+    
+  - id: "parse"
+    className: "com.digitalpebble.stormcrawler.bolt.JSoupParserBolt" 
+    parallelism: 1
+
+  - id: "index"
+    className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt"
+    parallelism: 1
+
+  - id: "status"
+    className: "com.digitalpebble.SQLStatusUpdaterBolt"
+    parallelism: 1
+
+  - id: "debug"
+    className: "com.digitalpebble.DebugBolt"
+    parallelism: 1
+
+streams:
+  - from: "spout"
+    to: "partitioner"
+    grouping:
+      type: SHUFFLE
+
+  - from: "spout"
+    to: "debug" 
+    grouping:
+      type: SHUFFLE
+
+  - from: "partitioner"
+    to: "fetcher"
+    grouping:
+      type: FIELDS
+      args: ["key"]
+
+  - from: "fetcher"
+    to: "sitemap"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "sitemap"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "fetcher"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "parse"
+    to: "index"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "fetcher"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "sitemap"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "parse"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "index"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+  - from: "parse"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "index"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE

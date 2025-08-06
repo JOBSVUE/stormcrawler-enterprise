@@ -1,10 +1,24 @@
 {
-  "com.digitalpebble.stormcrawler.parse.filter.ContentFilter": {
-    "pattern": "//DIV[@id=\"maincontent\"]",
-    "key": "content"
-  },
-  "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter": {
-    "pattern": "//A[@href]",
-    "key": "links"
-  }
+  "filters": [
+    {
+      "class": "com.digitalpebble.stormcrawler.parse.filter.ContentFilter",
+      "name": "ContentFilter",
+      "params": {
+        "pattern": "//DIV[@id=\"maincontent\"]",
+        "key": "content"
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
+      "name": "LinkParseFilter",
+      "params": {
+        "pattern": "//A[@href]",
+        "key": "links"
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.parse.filter.DomainParseFilter",
+      "name": "DomainParseFilter"
+    }
+  ]
 }
