@@ -17,7 +17,7 @@
       }
     },
     {
-      "class": "com.digitalpebble.stormcrawler.jsoup.LinkParseFilter", 
+      "class": "com.digitalpebble.stormcrawler.jsoup.LinkParseFilter",
       "name": "LinkParseFilter",
       "params": {
         "pattern": "//a[@href]"

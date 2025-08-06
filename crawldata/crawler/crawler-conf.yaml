@@ -86,7 +86,7 @@ urlfilters:
     params:
       file: "urlfilters.json"
 
-# Parse Filters - cleaned up duplicates
+# Parse Filters - cleaned up duplicates and fixed structure
 parsefilters:
   - class: "com.digitalpebble.stormcrawler.parse.filter.ContentFilter"
     name: "ContentFilter"

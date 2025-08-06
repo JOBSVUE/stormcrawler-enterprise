@@ -175,11 +175,6 @@ config:
       params:
         pattern: "//DIV[@id=\"maincontent\"]"
         key: "content"
-    - class: "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter"
-      name: "LinkParseFilter"
-      params:
-        pattern: "//A[@href]"
-        key: "links"
     - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
       name: "XPathFilter"
       params:

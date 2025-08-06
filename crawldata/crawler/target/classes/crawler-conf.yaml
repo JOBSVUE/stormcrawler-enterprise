@@ -8,8 +8,8 @@ config:
   topology.max.spout.pending: 100
   topology.debug: false
 
-  # General StormCrawler settings
-  parser.emitOutlinks: true
+  # General StormCrawler settings - DISABLE outlinks!
+  parser.emitOutlinks: false
   urlfilter.refreshConfigurationInBolt: true
   
   # User agent configuration
