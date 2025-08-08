@@ -49,6 +49,10 @@ until storm jar \
     target/stormcrawler-digitalpebble-1.0-SNAPSHOT.jar \
     org.apache.storm.flux.Flux \
     --remote \
+    -c sql.connection.string="${JDBC_URL}" \
+    -c sql.user="${JDBC_USER}" \
+    -c sql.password="${JDBC_PASS}" \
+    -c sql.status.table="crawl_queue" \
     crawler.flux
 do
   retry_count=$((retry_count + 1))

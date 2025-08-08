@@ -7,13 +7,42 @@
         "canonical": "//link[@rel='canonical']/@href",
         "parse.description": [
           "//meta[@name='description']/@content",
-          "//meta[@name='Description']/@content"
+          "//meta[@name='Description']/@content",
+          "//meta[@property='og:description']/@content"
         ],
         "parse.title": [
           "//title/text()",
-          "//meta[@name='title']/@content"
+          "//meta[@name='title']/@content",
+          "//meta[@property='og:title']/@content",
+          "//h1/text()"
         ],
-        "parse.keywords": "//meta[@name='keywords']/@content"
+        "parse.keywords": [
+          "//meta[@name='keywords']/@content",
+          "//meta[@name='Keywords']/@content"
+        ],
+        "parse.author": [
+          "//meta[@name='author']/@content",
+          "//meta[@name='Author']/@content"
+        ],
+        "parse.publishedDate": [
+          "//meta[@name='publishedDate']/@content",
+          "//meta[@property='article:published_time']/@content",
+          "//time/@datetime"
+        ]
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.jsoup.TextExtractionFilter",
+      "name": "TextExtractionFilter",
+      "params": {
+        "includePattern": [
+          "BODY"
+        ],
+        "excludePattern": [
+          "SCRIPT",
+          "STYLE",
+          "NOSCRIPT"
+        ]
       }
     },
     {

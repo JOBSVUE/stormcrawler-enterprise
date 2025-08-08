@@ -4,7 +4,7 @@ config:
   # Required configs that must be provided
   topology.workers: 1
   topology.message.timeout.secs: 300
-  topology.max.spout.pending: 100
+  topology.max.spout.pending: 300
   topology.debug: false
   
   # Elasticsearch configuration
@@ -22,6 +22,35 @@ config:
   es.indexer.bulkActions: 50
   es.indexer.bulkSize: "5mb"
   es.indexer.concurrentRequests: 1
+
+  # Oracle database configuration
+  sql.connection.string: "jdbc:oracle:thin:@//oracle-test:1521/XE"
+  sql.user: "c##mojtaba"
+  sql.password: "bjnSY55l0g1IrzWY71Jg"
+  sql.status.table: "crawl_queue"
+  sql.max.retries: 3
+  sql.retry.interval.ms: 2000
+  sql.show.sql: true
+
+  # Additional configurations
+  parser.emitOutlinks.max.per.page: 200
+  spout.fetch.batch: 80
+  spout.min.queue.size: 15
+  spout.fetch.interval.ms: 6000
+  spout.select.lock.rows: true
+  status.fetch.delay.mins: 1440
+  status.error.retry.mins: 30
+
+  # Indexer field configuration
+  indexer.url.fieldname: "url"
+  indexer.text.fieldname: "text"
+  indexer.md.mapping:
+    - parse.title=title
+    - parse.description=description
+    - parse.keywords=keywords
+    - parse.author=author
+    - parse.publishedDate=publishedDate
+    - canonical=canonical
 
 spouts:
   - id: "spout"
@@ -55,7 +84,7 @@ bolts:
 
   - id: "status"
     className: "com.digitalpebble.SQLStatusUpdaterBolt"
-    parallelism: 1
+    parallelism: 2
 
   - id: "debug"
     className: "com.digitalpebble.DebugBolt"
@@ -119,9 +148,5 @@ streams:
   - from: "index"
     to: "status"
     grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
       type: LOCAL_OR_SHUFFLE
       streamId: "status"

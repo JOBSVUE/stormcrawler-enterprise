@@ -32,37 +32,49 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
     private boolean showSQL = false;
     private int maxRetries = 3;
     private long retryIntervalMs = 2000;
+    private int fetchedDelayMinutes = 60;      // default re-fetch delay (if ever reused)
+    private int errorRetryMinutes = 10;        // delay before retrying errors (if policy changes)
 
     @Override
     public void prepare(Map<String, Object> conf, TopologyContext context, OutputCollector collector) {
         this.collector = collector;
-        
-        // Get configuration values
-        connectionString = (String) conf.get("sql.connection.string");
-        username = (String) conf.get("sql.user");
-        password = (String) conf.get("sql.password");
-        statusTable = (String) conf.get("sql.status.table");
-        
+        // Get configuration values (prefer Storm config; fallback to env)
+        connectionString = orFirstNonEmpty(
+                (String) conf.get("sql.connection.string"),
+                System.getenv("JDBC_URL"));
+        username = orFirstNonEmpty(
+                (String) conf.get("sql.user"),
+                System.getenv("JDBC_USER"));
+        password = orFirstNonEmpty(
+                (String) conf.get("sql.password"),
+                System.getenv("JDBC_PASS"));
+        statusTable = orFirstNonEmpty(
+                (String) conf.get("sql.status.table"),
+                "crawl_queue");
+
         if (conf.containsKey("sql.show.sql")) {
             showSQL = Boolean.parseBoolean(String.valueOf(conf.get("sql.show.sql")));
         }
-        
         if (conf.containsKey("sql.max.retries")) {
             maxRetries = Integer.parseInt(String.valueOf(conf.get("sql.max.retries")));
         }
-        
         if (conf.containsKey("sql.retry.interval.ms")) {
             retryIntervalMs = Long.parseLong(String.valueOf(conf.get("sql.retry.interval.ms")));
         }
-        
-        LOG.info("=== SQL STATUS UPDATER CONFIGURATION ===");
-        LOG.info("Connection String: {}", connectionString);
-        LOG.info("Username: {}", username);
-        LOG.info("Status Table: {}", statusTable);
-        LOG.info("Show SQL: {}", showSQL);
-        LOG.info("Max Retries: {}", maxRetries);
-        LOG.info("Retry Interval: {} ms", retryIntervalMs);
-        
+        if (conf.containsKey("status.fetch.delay.mins"))
+            fetchedDelayMinutes = Integer.parseInt(String.valueOf(conf.get("status.fetch.delay.mins")));
+        if (conf.containsKey("status.error.retry.mins"))
+            errorRetryMinutes = Integer.parseInt(String.valueOf(conf.get("status.error.retry.mins")));
+
+        LOG.info("Status backoff: fetchedDelay={}m errorRetry={}m", fetchedDelayMinutes, errorRetryMinutes);
+
+        if (isBlank(connectionString) || isBlank(username) || isBlank(password)) {
+            LOG.error("Missing mandatory SQL config (sql.connection.string / sql.user / sql.password)");
+            throw new IllegalStateException("SQL configuration incomplete");
+        }
+        LOG.info("SQLStatusUpdaterBolt configured: url='{}', user='{}', table='{}'",
+                safeUrl(connectionString), username, statusTable);
+
         initializeConnection();
     }
 
@@ -70,14 +82,14 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
         LOG.info("Initializing SQL connection...");
         int attempts = 0;
         boolean connected = false;
-        
+
         while (!connected && attempts < maxRetries) {
             attempts++;
             try {
                 // Load the JDBC driver
                 Class.forName("oracle.jdbc.OracleDriver");
                 LOG.info("Oracle JDBC driver loaded successfully");
-                
+
                 // Establish connection
                 connection = DriverManager.getConnection(connectionString, username, password);
                 connection.setAutoCommit(true);
@@ -97,21 +109,21 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
                 }
             }
         }
-        
+
         if (!connected) {
             LOG.error("Failed to connect to database after {} attempts", maxRetries);
         }
     }
-    
+
     @Override
     public void execute(Tuple tuple) {
         String url = tuple.getStringByField("url");
         Status status = (Status) tuple.getValueByField("status");
-        
+
         // Map StormCrawler status to database status
         String statusString = mapStatusToDb(status);
         LOG.info("Updating status for URL: {} to {} (StormCrawler: {})", url, statusString, status);
-        
+
         if (connection == null) {
             LOG.warn("Database connection is null, reconnecting...");
             initializeConnection();
@@ -121,25 +133,33 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
                 return;
             }
         }
-        
+
         // Use MERGE statement for upsert functionality
-        final String sql = "MERGE INTO " + statusTable + " t USING (SELECT ? as url, ? as status FROM dual) s " +
-                          "ON (t.url = s.url) " +
-                          "WHEN MATCHED THEN UPDATE SET t.status = s.status, t.nextfetchdate = SYSTIMESTAMP " +
-                          "WHEN NOT MATCHED THEN INSERT (url, status, nextfetchdate, host) " +
-                          "VALUES (s.url, s.status, SYSTIMESTAMP, ?)";
-        
+        final String sql =
+                "MERGE INTO " + statusTable + " t USING (SELECT ? as url, ? as status FROM dual) s " +
+                "ON (t.url = s.url) " +
+                "WHEN MATCHED THEN UPDATE SET " +
+                " t.status = s.status," +
+                " t.nextfetchdate = (CASE " +
+                "   WHEN s.status='FETCHED' THEN SYSTIMESTAMP + NUMTODSINTERVAL(" + fetchedDelayMinutes + ", 'MINUTE')" +
+                "   WHEN s.status='ERROR' THEN SYSTIMESTAMP + NUMTODSINTERVAL(" + errorRetryMinutes + ", 'MINUTE')" +
+                "   ELSE t.nextfetchdate END) " +
+                "WHEN NOT MATCHED THEN INSERT (url, status, nextfetchdate, host) " +
+                "VALUES (s.url, s.status, (CASE " +
+                "   WHEN s.status='FETCHED' THEN SYSTIMESTAMP + NUMTODSINTERVAL(" + fetchedDelayMinutes + ", 'MINUTE')" +
+                "   WHEN s.status='ERROR' THEN SYSTIMESTAMP + NUMTODSINTERVAL(" + errorRetryMinutes + ", 'MINUTE')" +
+                "   ELSE SYSTIMESTAMP END), ?)";
         if (showSQL) {
             LOG.info("SQL: {} with params [{}, {}, {}]", sql, url, statusString, extractHost(url));
         }
-        
+
         try {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, url);
                 statement.setString(2, statusString);
                 statement.setString(3, extractHost(url));
                 int updated = statement.executeUpdate();
-                
+
                 LOG.debug("Processed {} rows for URL: {}", updated, url);
                 collector.ack(tuple);
             }
@@ -156,7 +176,7 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
             collector.fail(tuple);
         }
     }
-    
+
     private String mapStatusToDb(Status status) {
         switch (status) {
             case DISCOVERED:
@@ -171,7 +191,7 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
                 return status.toString();
         }
     }
-    
+
     private String extractHost(String url) {
         try {
             java.net.URL u = new java.net.URL(url);
@@ -197,5 +217,23 @@ public class SQLStatusUpdaterBolt extends BaseRichBolt {
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
         // No output fields to declare as this is a terminal bolt
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    private static String orFirstNonEmpty(String... vals) {
+        for (String v : vals)
+            if (!isBlank(v))
+                return v;
+        return null;
+    }
+
+    private static String safeUrl(String url) {
+        if (url == null)
+            return null;
+        // Strip credentials if accidentally embedded
+        return url.replaceAll("//([^:@/]+):[^@/]+@", "//$1:***@");
     }
 }

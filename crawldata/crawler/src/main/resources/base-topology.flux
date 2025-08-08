@@ -1,15 +1,10 @@
 name: "base-topology"
 
-spouts:
-  - id: "spout"
-    className: "com.digitalpebble.SimpleOracleSpout"
-    parallelism: 1
-
 config:
   # Required configs that must be provided
   topology.workers: 1
   topology.message.timeout.secs: 300
-  topology.max.spout.pending: 200
+  topology.max.spout.pending: 300
   topology.kryo.register:
     - com.digitalpebble.stormcrawler.Metadata
   
@@ -27,39 +22,79 @@ config:
   sql.retry.interval.ms: 2000
   sql.show.sql: true
 
+  # throttle outlinks (if inherited)
+  parser.emitOutlinks.max.per.page: 200
+
+spouts:
+  - id: "spout"
+    className: "com.digitalpebble.SimpleOracleSpout"
+    parallelism: 1
+    # (Relies on -c sql.* passed at submission or included config)
+
 bolts:
-  - id: "indexer"
-    className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt"
-    parallelism: 1
-    
-  - id: "status"
-    className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.StatusUpdaterBolt"
-    parallelism: 1
-    
   - id: "fetcher"
     className: "com.digitalpebble.stormcrawler.bolt.FetcherBolt"
     parallelism: 1
-    
   - id: "sitemap"
     className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"
     parallelism: 1
-    
   - id: "parse"
     className: "com.digitalpebble.stormcrawler.bolt.JSoupParserBolt"
     parallelism: 1
+  - id: "indexer"
+    className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt"
+    parallelism: 1
+  - id: "status"
+    className: "com.digitalpebble.SQLStatusUpdaterBolt"
+    parallelism: 2
 
 streams:
+  # Correct ingestion + fetch
   - from: "spout"
-    to: "parse"
+    to: "fetcher"
     grouping:
       type: SHUFFLE
 
+  # Fetcher -> sitemap + parser (direct content)
+  - from: "fetcher"
+    to: "sitemap"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+  - from: "fetcher"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # Sitemap -> parse
+  - from: "sitemap"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # Parse -> indexer
+  - from: "parse"
+    to: "indexer"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # Status side-streams
+  - from: "fetcher"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
+  - from: "sitemap"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
   - from: "parse"
     to: "status"
     grouping:
-      type: SHUFFLE
-
-  - from: "status"
-    to: "indexer" 
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
+  - from: "indexer"
+    to: "status"
     grouping:
-      type: SHUFFLE
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"

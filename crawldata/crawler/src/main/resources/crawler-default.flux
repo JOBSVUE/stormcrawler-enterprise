@@ -6,29 +6,10 @@ spouts:
     parallelism: 1
 
 config:
-  # Elasticsearch configuration for content indexing
-  es.indexer.addresses: ["http://elasticsearch:9200"]
-  es.indexer.index.name: "content"
-  es.indexer.create: true
-  es.indexer.doc.type: "_doc"
-  es.indexer.flushInterval: "5s"
-  es.indexer.bulkActions: 50
-  es.indexer.bulkSize: "5mb"
-  es.indexer.concurrentRequests: 1
-  
-  # Connection settings
-  es.client.connection.timeout: 10000
-  es.client.socket.timeout: 10000
-  es.client.max.connections.per.route: 20
-  es.client.max.connections.total: 100
-  
-  # Index options
-  es.indexer.pipeline: "_none"
-  
   # Basic crawler configuration
   topology.workers: 1
   topology.message.timeout.secs: 300
-  topology.max.spout.pending: 100
+  topology.max.spout.pending: 300
   topology.debug: false
   
   # Fetcher configuration
@@ -36,7 +17,7 @@ config:
   fetcher.server.delay: 1.0
   fetcher.max.crawl.delay: 30
   
-  # Parser configuration - use jsoupfilters instead of parsefilters
+  # Parser configuration
   jsoupfilters.config.file: "jsoupfilters.json"
   urlfilters.config.file: "urlfilters.json"
   
@@ -55,12 +36,41 @@ config:
   # User-Agent configuration
   http.agent.name: "Mozilla/5.0 (compatible; StormCrawler/2.0; +https://stormcrawler.net)"
   
-  # Elasticsearch configuration
+  # Elasticsearch configuration for content indexing
   es.indexer.addresses: ["http://elasticsearch:9200"]
   es.indexer.index.name: "content"
   es.indexer.create: true
+  es.indexer.doc.type: "_doc"
+  es.indexer.flushInterval: "5s"
+  es.indexer.bulkActions: 50
+  es.indexer.bulkSize: "5mb"
+  es.indexer.concurrentRequests: 1
+  indexer.url.fieldname: "url"
+  indexer.text.fieldname: "text"
+  indexer.md.mapping:
+    - parse.title=title
+    - parse.description=description
+    - parse.keywords=keywords
+    - parse.author=author
+    - parse.publishedDate=publishedDate
+    - canonical=canonical
   
-  # Crawler config
+  # Connection settings
+  es.client.connection.timeout: 10000
+  es.client.socket.timeout: 10000
+  es.client.max.connections.per.route: 20
+  es.client.max.connections.total: 100
+
+  # Crawler-specific settings
+  parser.emitOutlinks.max.per.page: 200
+  spout.fetch.batch: 80
+  spout.min.queue.size: 15
+  spout.fetch.interval.ms: 6000
+  spout.select.lock.rows: true
+  status.fetch.delay.mins: 1440
+  status.error.retry.mins: 30
+
+  # Protocol implementations
   http.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
   https.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
 
@@ -71,15 +81,15 @@ bolts:
 
   - id: "fetcher" 
     className: "com.digitalpebble.stormcrawler.bolt.FetcherBolt"
-    parallelism: 1
+    parallelism: 2
     
   - id: "sitemap"
-    className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"  
+    className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"
     parallelism: 1
     
   - id: "parse"
     className: "com.digitalpebble.stormcrawler.bolt.JSoupParserBolt" 
-    parallelism: 1
+    parallelism: 2
 
   - id: "index"
     className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt"
@@ -87,74 +97,77 @@ bolts:
 
   - id: "status"
     className: "com.digitalpebble.SQLStatusUpdaterBolt"
-    parallelism: 1
+    parallelism: 2
 
   - id: "debug"
     className: "com.digitalpebble.DebugBolt"
     parallelism: 1
 
 streams:
+  # From spout to URL partitioner
   - from: "spout"
     to: "partitioner"
     grouping:
       type: SHUFFLE
 
+  # Debug stream to monitor spout output
   - from: "spout"
     to: "debug" 
     grouping:
       type: SHUFFLE
 
+  # From partitioner to fetcher (field grouping for load balancing)
   - from: "partitioner"
     to: "fetcher"
     grouping:
       type: FIELDS
       args: ["key"]
 
+  # From fetcher to sitemap parser
   - from: "fetcher"
     to: "sitemap"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
+  # From sitemap to content parser
   - from: "sitemap"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
+  # From fetcher directly to content parser (for non-sitemap content)
   - from: "fetcher"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
+  # From parser to indexer
   - from: "parse"
     to: "index"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
+  # Status updates from all processing bolts
   - from: "fetcher"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
+      streamId: "status"
 
   - from: "sitemap"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
+      streamId: "status"
 
   - from: "parse"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
+      streamId: "status"
 
   - from: "index"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
-  - from: "parse"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-
-  - from: "index"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
+      streamId: "status"

@@ -29,6 +29,12 @@ public class SimpleOracleSpout extends BaseRichSpout {
     private long totalFetched = 0;
     private long lastLogTime = System.currentTimeMillis();
     private long lastFetchTime = 0;
+    // Added missing configurable batch size holder
+    private int fetchBatchSize = FETCH_BATCH_SIZE;
+    // new tunables
+    private int minQueueRefillThreshold = 10;
+    private long fetchIntervalMs = FETCH_INTERVAL_MS;
+    private boolean useRowLocking = true;
 
     // Optional: tune how many URLs to load in one fetch
     private static final int FETCH_BATCH_SIZE = 50;
@@ -52,10 +58,36 @@ public class SimpleOracleSpout extends BaseRichSpout {
         LOG.info("============= OPENING SIMPLE ORACLE SPOUT =============");
         this.collector = collector;
         
-        // Get configuration from Storm config or use hardcoded values
-        this.jdbcUrl = (String) conf.getOrDefault("sql.connection.string", "jdbc:oracle:thin:@//oracle-test:1521/XE");
-        this.user = (String) conf.getOrDefault("sql.user", "c##mojtaba");
-        this.pass = (String) conf.getOrDefault("sql.password", "bjnSY55l0g1IrzWY71Jg");
+        this.jdbcUrl = firstNonEmpty(
+                (String) conf.get("sql.connection.string"),
+                System.getenv("JDBC_URL"),
+                "jdbc:oracle:thin:@//oracle-test:1521/XE");
+        this.user = firstNonEmpty(
+                (String) conf.get("sql.user"),
+                System.getenv("JDBC_USER"),
+                "c##mojtaba");
+        this.pass = firstNonEmpty(
+                (String) conf.get("sql.password"),
+                System.getenv("JDBC_PASS"));
+        this.fetchBatchSize = parseIntOrDefault(
+                conf.get("spout.fetch.batch"),
+                System.getenv("SPOUT_FETCH_BATCH"),
+                FETCH_BATCH_SIZE);
+        this.minQueueRefillThreshold = parseIntOrDefault(
+                conf.get("spout.min.queue.size"),
+                System.getenv("SPOUT_MIN_QUEUE"),
+                10);
+        this.fetchIntervalMs = parseIntOrDefault(
+                conf.get("spout.fetch.interval.ms"),
+                System.getenv("SPOUT_FETCH_INTERVAL_MS"),
+                (int) FETCH_INTERVAL_MS);
+        this.useRowLocking = Boolean.parseBoolean(
+                firstNonEmpty(
+                        asString(conf.get("spout.select.lock.rows")),
+                        System.getenv("SPOUT_LOCK_ROWS"),
+                        "true"));
+        LOG.info("Spout tuning: batchSize={}, minQueueRefill={}, fetchIntervalMs={}, rowLocking={}",
+                fetchBatchSize, minQueueRefillThreshold, fetchIntervalMs, useRowLocking);
         
         LOG.info("=== ORACLE SPOUT CONFIGURATION ===");
         LOG.info("  Component ID: {}", ctx.getThisComponentId());
@@ -67,7 +99,6 @@ public class SimpleOracleSpout extends BaseRichSpout {
         
         if (jdbcUrl == null || user == null || pass == null) {
             LOG.error("=== CRITICAL ERROR: JDBC CONFIGURATION MISSING ===");
-            LOG.error("Missing configuration keys:");
             if (jdbcUrl == null) LOG.error("  jdbc.url is not set");
             if (user == null) LOG.error("  jdbc.user is not set");
             if (pass == null) LOG.error("  jdbc.pass is not set");
@@ -102,7 +133,7 @@ public class SimpleOracleSpout extends BaseRichSpout {
                     LOG.info("✓ Database connection established successfully on attempt {}", attempt);
                     testDatabaseConnection();
                     connectionInitialized = true;
-                    return; // Success, exit retry loop
+                    return;
                 } catch (SQLException e) {
                     LOG.error("✗ Failed to establish database connection on attempt {}: {}", 
                              attempt, e.getMessage());
@@ -134,7 +165,6 @@ public class SimpleOracleSpout extends BaseRichSpout {
         LOG.info("=== TESTING DATABASE CONNECTION ===");
         
         try {
-            // Check total count
             try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM crawl_queue")) {
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
@@ -144,7 +174,6 @@ public class SimpleOracleSpout extends BaseRichSpout {
                 }
             }
             
-            // Check status breakdown
             try (PreparedStatement ps = connection.prepareStatement("SELECT status, COUNT(*) FROM crawl_queue GROUP BY status")) {
                 try (ResultSet rs = ps.executeQuery()) {
                     LOG.info("Status breakdown:");
@@ -164,9 +193,8 @@ public class SimpleOracleSpout extends BaseRichSpout {
 
     @Override
     public void nextTuple() {
-        // Log periodic statistics
         long currentTime = System.currentTimeMillis();
-        if (currentTime - lastLogTime > 30000) { // Every 30 seconds
+        if (currentTime - lastLogTime > 30000) {
             LOG.info("=== SPOUT STATISTICS ===");
             LOG.info("Total URLs fetched from DB: {}", totalFetched);
             LOG.info("Total URLs emitted: {}", totalEmitted);
@@ -176,7 +204,6 @@ public class SimpleOracleSpout extends BaseRichSpout {
             lastLogTime = currentTime;
         }
         
-        // Ensure we have a valid connection before proceeding
         if (!connectionInitialized) {
             LOG.warn("Database connection not initialized, attempting to reconnect...");
             initializeConnection();
@@ -187,27 +214,21 @@ public class SimpleOracleSpout extends BaseRichSpout {
             }
         }
 
-        // Fetch more URLs if queue is low and enough time has passed
-        if (queue.size() < 10 && (currentTime - lastFetchTime) > FETCH_INTERVAL_MS) {
-            LOG.debug("Queue is low ({} items), fetching URLs from database...", queue.size());
+        if (queue.size() < minQueueRefillThreshold &&
+                (System.currentTimeMillis() - lastFetchTime) > fetchIntervalMs) {
             fetchUrlsFromDb();
-            lastFetchTime = currentTime;
+            lastFetchTime = System.currentTimeMillis();
         }
 
         String url = queue.poll();
         if (url != null) {
-            // Create proper metadata for StormCrawler
             Metadata metadata = new Metadata();
-            
-            // Use URL as message ID for tracking
-            Object msgId = url + "_" + System.currentTimeMillis();
+            Object msgId = url + "_" + System.nanoTime();
             pending.put(msgId, url);
-            
-            LOG.info("✓ EMITTING URL: {} with msgId: {}", url, msgId);
+            LOG.debug("Emitting URL {}", url);
             collector.emit(new Values(url, metadata), msgId);
             totalEmitted++;
         } else {
-            LOG.trace("No URL to emit, sleeping 100ms...");
             sleep(100);
         }
     }
@@ -231,55 +252,63 @@ public class SimpleOracleSpout extends BaseRichSpout {
     }
 
     private void fetchUrlsFromDb() {
-        final String sql = "SELECT url FROM crawl_queue WHERE status='NEW' AND ROWNUM <= ?";
-        
-        LOG.debug("Executing SQL: {} with batch size: {}", sql, FETCH_BATCH_SIZE);
-        
+        final String selectSQL =
+                "SELECT url FROM " + statusTableName() +
+                " WHERE status IN ('NEW','DISCOVERED') " +
+                " AND (nextfetchdate IS NULL OR nextfetchdate <= SYSTIMESTAMP) " +
+                " AND ROWNUM <= ? " +
+                (useRowLocking ? " FOR UPDATE SKIP LOCKED" : "");
+        LOG.debug("Selecting up to {} URLs (locking={})", fetchBatchSize, useRowLocking);
         try {
             if (connection == null || connection.isClosed()) {
-                LOG.warn("Connection closed or null, reconnecting...");
                 initializeConnection();
-                if (!connectionInitialized) {
-                    return;
-                }
+                if (!connectionInitialized) return;
             }
-            
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setInt(1, FETCH_BATCH_SIZE);
-                ps.setQueryTimeout(30);
-
+            if (useRowLocking) connection.setAutoCommit(false);
+            int selected = 0;
+            try (PreparedStatement ps = connection.prepareStatement(selectSQL)) {
+                ps.setInt(1, fetchBatchSize);
                 try (ResultSet rs = ps.executeQuery()) {
-                    int count = 0;
                     while (rs.next()) {
-                        String url = rs.getString("url");
-                        if (url != null && !url.trim().isEmpty()) {
-                            queue.offer(url);
-                            count++;
-                            LOG.debug("Queued URL: {}", url);
+                        String u = rs.getString(1);
+                        if (u != null && !u.isBlank()) {
+                            queue.offer(u);
+                            selected++;
                         }
                     }
-                    
-                    totalFetched += count;
-                    if (count > 0) {
-                        LOG.info("✓ Fetched {} URLs from database (total fetched: {})", count, totalFetched);
-                    } else {
-                        LOG.info("No NEW URLs found in database");
-                    }
                 }
             }
+            if (selected > 0 && useRowLocking) {
+                try (PreparedStatement ups = connection.prepareStatement(
+                        "UPDATE " + statusTableName() +
+                        " SET status='FETCHING', last_updated = SYSTIMESTAMP " +
+                        " WHERE url IN (SELECT url FROM " + statusTableName() +
+                        " WHERE status='FETCHING' OR status='NEW' OR status='DISCOVERED') AND ROWNUM <= ?")) {
+                    ups.setInt(1, selected);
+                    ups.executeUpdate();
+                } catch (SQLException ignore) {}
+            }
+            if (useRowLocking) connection.commit();
+            totalFetched += selected;
+            LOG.info("Fetched {} URLs (queueSize={}, totalFetched={})", selected, queue.size(), totalFetched);
         } catch (SQLException e) {
-            LOG.error("Database error while fetching URLs: {}", e.getMessage(), e);
+            LOG.error("DB fetch failure: {}", e.getMessage(), e);
+            try { if (useRowLocking && connection != null) connection.rollback(); } catch (SQLException ignore) {}
             connectionInitialized = false;
-        } catch (Exception e) {
-            LOG.error("Unexpected error while fetching URLs: {}", e.getMessage(), e);
-            connectionInitialized = false;
+        } finally {
+            if (useRowLocking) {
+                try { connection.setAutoCommit(true); } catch (SQLException ignore) {}
+            }
         }
     }
 
     private void updateUrlStatus(String url, String status) {
-        final String sql = "UPDATE crawl_queue SET status = ? WHERE url = ?";
+        final String sql =
+            "UPDATE " + statusTableName() +
+            " SET status = ?, nextfetchdate = (CASE WHEN ?='FETCHED' THEN SYSTIMESTAMP + (1/24/12) ELSE nextfetchdate END) " +
+            " WHERE url = ?";
         
-        LOG.debug("Updating status for URL {} to {}", url, status);
+        LOG.debug("Updating status {} -> {}", url, status);
         
         try {
             if (connection == null || connection.isClosed()) {
@@ -292,7 +321,8 @@ public class SimpleOracleSpout extends BaseRichSpout {
             
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, status);
-                ps.setString(2, url);
+                ps.setString(2, status);
+                ps.setString(3, url);
                 int updated = ps.executeUpdate();
                 LOG.debug("Updated {} rows to {} for URL: {}", updated, status, url);
             }
@@ -302,6 +332,27 @@ public class SimpleOracleSpout extends BaseRichSpout {
         }
     }
 
+    private String statusTableName(){
+        return "crawl_queue";
+    }
+
+    // Helpers
+    private static String asString(Object o) {
+        if (o == null) return null;
+        String s = o.toString().trim();
+        return s.isEmpty() ? null : s;
+    }
+    private static String firstNonEmpty(String... vals){
+        for (String v: vals) if (v!=null && !v.trim().isEmpty()) return v;
+        return null;
+    }
+    private static int parseIntOrDefault(Object confVal, String envVal, int def){
+        try {
+            if (confVal != null) return Integer.parseInt(confVal.toString());
+            if (envVal != null && !envVal.isBlank()) return Integer.parseInt(envVal);
+        } catch (NumberFormatException ignore){}
+        return def;
+    }
     private void sleep(long millis) {
         try {
             Thread.sleep(millis);

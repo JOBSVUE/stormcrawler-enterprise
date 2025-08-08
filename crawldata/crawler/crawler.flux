@@ -9,7 +9,7 @@ config:
   # Required configs that must be provided
   topology.workers: 1
   topology.message.timeout.secs: 300
-  topology.max.spout.pending: 100
+  topology.max.spout.pending: 300
   topology.debug: false
   topology.name: "stormcrawler-enterprise"
   
@@ -50,6 +50,15 @@ config:
   http.agent.version: "1.0"
   http.agent.description: "Enterprise web crawler"
 
+  # Spout tunables
+  parser.emitOutlinks.max.per.page: 200
+  spout.fetch.batch: 100
+  spout.min.queue.size: 20
+  spout.fetch.interval.ms: 5000
+  spout.select.lock.rows: true
+  status.fetch.delay.mins: 1440
+  status.error.retry.mins: 30
+
 spouts:
   - id: "spout"
     className: "com.digitalpebble.SimpleOracleSpout"
@@ -62,7 +71,7 @@ bolts:
 
   - id: "fetcher" 
     className: "com.digitalpebble.stormcrawler.bolt.FetcherBolt"
-    parallelism: 2
+    parallelism: 3
     
   - id: "sitemap"
     className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"
@@ -70,7 +79,7 @@ bolts:
     
   - id: "parse"
     className: "com.digitalpebble.stormcrawler.bolt.JSoupParserBolt" 
-    parallelism: 2
+    parallelism: 3
 
   - id: "index"
     className: "com.digitalpebble.stormcrawler.elasticsearch.bolt.IndexerBolt"
@@ -78,7 +87,7 @@ bolts:
 
   - id: "status"
     className: "com.digitalpebble.SQLStatusUpdaterBolt"
-    parallelism: 1
+    parallelism: 2
 
   - id: "debug"
     className: "com.digitalpebble.DebugBolt"

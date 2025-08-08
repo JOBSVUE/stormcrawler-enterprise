@@ -1,18 +1,11 @@
 {
   "filters": [
     {
-      "class": "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter",
-      "name": "RegexURLFilter",
-      "params": {
-        "file": "default-regex-filters.txt"
-      }
-    },
-    {
       "class": "com.digitalpebble.stormcrawler.filtering.basic.BasicURLFilter",
       "name": "BasicURLFilter",
       "params": {
         "maxPathRepetition": 3,
-        "maxLength": 1024
+        "maxLength": 2048
       }
     },
     {

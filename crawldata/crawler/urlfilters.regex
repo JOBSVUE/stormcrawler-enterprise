@@ -1,7 +1,5 @@
 # Allow everything by default - basic regex filter patterns
 # Deny common non-content files
 -(?i)\.(css|js|bmp|gif|jpe?g|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|pdf|rm|smil|wmv|swf|wma|zip|rar|gz)$
-# Deny URLs with query parameters that indicate dynamic content
--.*[?&](page|p|start|offset|from|begin)=[0-9]+
 # Allow everything else
 +.*

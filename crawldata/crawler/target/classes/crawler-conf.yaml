@@ -8,8 +8,9 @@ config:
   topology.max.spout.pending: 100
   topology.debug: false
 
-  # General StormCrawler settings - DISABLE outlinks!
-  parser.emitOutlinks: false
+  # General StormCrawler settings - ENABLE outlinks for full content capture!
+  parser.emitOutlinks: true
+  parser.emitOutlinks.max.per.page: 200
   urlfilter.refreshConfigurationInBolt: true
   
   # User agent configuration
@@ -26,10 +27,16 @@ config:
   fetcher.threads.per.queue: 1
   fetcherbolt.queue.debug.name: "fetcher-queue-debug"
 
-  # Parsing behavior
-  jsoup.treat.non.html.as.error: true
-  parser.emitOutlinks.max.per.page: 100
-  parser.robots.nofollow: true
+  # Parsing behavior - capture everything
+  jsoup.treat.non.html.as.error: false
+  parser.robots.nofollow: false
+  textextractor.no.text: false
+  textextractor.include.pattern:
+    - BODY
+  textextractor.exclude.tags:
+    - STYLE
+    - SCRIPT
+    - NOSCRIPT
   
   # Status storage
   status.updater.cache.spec: "maximumSize=10000,expireAfterAccess=1h"
@@ -76,3 +83,23 @@ config:
       parallelism.hint: 1
     - class: "com.digitalpebble.stormcrawler.elasticsearch.metrics.MetricsConsumer"
       parallelism.hint: 1
+
+  # Status retry / backoff (consumed by SQLStatusUpdaterBolt)
+  status.fetch.delay.mins: 1440
+  status.error.retry.mins: 30
+  # Spout tuning overrides (optional)
+  spout.fetch.batch: 80
+  spout.min.queue.size: 15
+  spout.fetch.interval.ms: 6000
+  spout.select.lock.rows: true
+
+  # Elasticsearch indexer field mappings to avoid empty _source
+  indexer.url.fieldname: "url"
+  indexer.text.fieldname: "text"
+  indexer.md.mapping:
+    - parse.title=title
+    - parse.description=description
+    - parse.keywords=keywords
+    - parse.author=author
+    - parse.publishedDate=publishedDate
+    - canonical=canonical

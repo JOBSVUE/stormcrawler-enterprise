@@ -1,6 +1,6 @@
 # StormCrawler Oracle Configuration
 
-# Database connection - use environment variables
+# Database connection
 jdbc.url: "jdbc:oracle:thin:@//oracle-test:1521/XE"
 jdbc.user: "c##mojtaba"
 jdbc.pass: "bjnSY55l0g1IrzWY71Jg"
@@ -64,11 +64,13 @@ topology.kryo.register:
   - "java.util.Collections$EmptyMap"
   - "org.apache.storm.shade.net.minidev.json.JSONObject"
 
-# Additional fetcher configs
+# Additional fetcher configs - capture everything
 fetcher.server.min.delay: 0.0
 fetcher.max.crawl.delay: 30
 http.store.responsetime: true
 http.skip.robots: false
+parser.emitOutlinks: true
+parser.emitOutlinks.max.per.page: 1000
 
 # FileSpout configuration  
 spout.absolutepath: false
@@ -77,30 +79,28 @@ fileSpout.file: "urls.txt"
 
 # Status configuration
 status.updater.unit.round.date: "SECONDS"
-status.updater.class: "com.digitalpebble.stormcrawler.sql.SQLStatusUpdaterBolt"
+status.updater.class: "com.digitalpebble.SQLStatusUpdaterBolt"
 
-# URL Filters
+# URL Filters - minimal filtering
 urlfilters:
-  - class: "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter"
-    name: "RegexURLFilter"
+  - class: "com.digitalpebble.stormcrawler.filtering.basic.BasicURLFilter"
+    name: "BasicURLFilter"
     params:
-      file: "urlfilters.json"
+      maxPathRepetition: 5
+      maxLength: 2048
 
-# Parse Filters - cleaned up duplicates and fixed structure
+# Parse Filters - capture all content
 parsefilters:
   - class: "com.digitalpebble.stormcrawler.parse.filter.ContentFilter"
     name: "ContentFilter"
     params:
-      pattern: "//DIV[@id=\"maincontent\"]"
+      pattern: "//BODY"
       key: "content"
   - class: "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter"
     name: "LinkParseFilter"
     params:
       pattern: "//A[@href]"
       key: "links"
-  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
-    name: "XPathFilter"
-    params:
       - key: "title"
         pattern: "//TITLE"
       - key: "description"

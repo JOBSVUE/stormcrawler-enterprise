@@ -4,8 +4,15 @@
       "class": "com.digitalpebble.stormcrawler.parse.filter.ContentFilter",
       "name": "ContentFilter",
       "params": {
-        "pattern": "//DIV[@id=\"maincontent\"]",
+        "pattern": "//BODY",
         "key": "content"
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
+      "name": "LinkParseFilter",
+      "params": {
+        "pattern": "//A[@href]"
       }
     },
     {
