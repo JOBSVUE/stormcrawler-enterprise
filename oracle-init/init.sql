@@ -43,7 +43,7 @@ INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.
 INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55260/zionists-in-charge', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55198/the-truth-behind-mbs-relation-with-the-us', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55172/firearms-in-the-us-statistics-and-facts', 'NEW', SYSTIMESTAMP, 'yjc.ir');
-INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55067/disaster-land', 'NEW', SYSTIMESTAMP, 'yjc.ir');
+INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://news.cgtn.com/news/2025-08-08/Modi-pledges-support-for-farmers-amid-Trump-s-tariff-threat--1FFCeheM8KY/p.html', 'NEW', SYSTIMESTAMP, 'cgtn.com');
 INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/54690/malcolm-x%E2%80%99s-daughter-malikah-shabazz-found-dead-in-nyc-home', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/51305/stop-lying-muslim-advocacy-group-sues-facebook-over-claims-it-removes-hate-speech-hate-speech', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 

@@ -1,3 +1,11 @@
+# ARCHITECTURE NOTE:
+# Pipeline: Oracle->(spout)->partitioner(host key)->fetcher(threads)->sitemap/parse->index(ES)+status(Oracle).
+# Concerns:
+# - Credentials embedded (sql.password) -> externalize via env / -c injection only.
+# - Single worker limits horizontal scaling; raise topology.workers & per-bolt parallelism for throughput.
+# - Consider adding metrics consumer & lowering log verbosity.
+# - Frontier service present but unused; remove if Oracle-only.
+# - Evaluate setting nextfetchdate for NEW to avoid immediate reselect loops.
 name: "crawler"
 
 includes:
@@ -51,13 +59,16 @@ config:
   http.agent.description: "Enterprise web crawler"
 
   # Spout tunables
-  parser.emitOutlinks.max.per.page: 200
+  parser.emitOutlinks: false
   spout.fetch.batch: 100
   spout.min.queue.size: 20
   spout.fetch.interval.ms: 5000
   spout.select.lock.rows: true
   status.fetch.delay.mins: 1440
   status.error.retry.mins: 30
+
+  # JSoup configuration
+  jsoupfilters.config.file: "jsoupfilters.json"
 
 spouts:
   - id: "spout"

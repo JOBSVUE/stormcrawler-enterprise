@@ -57,6 +57,7 @@ http.agent.email:       "admin@example.com"
 # URL / parse filters
 urlfilters.config.file:   "urlfilters.json"
 parsefilters.config.file: "parsefilters.json"
+jsoupfilters.config.file: "jsoupfilters.json"
 
 # Kryo registrations
 topology.kryo.register:
@@ -69,8 +70,7 @@ fetcher.server.min.delay: 0.0
 fetcher.max.crawl.delay: 30
 http.store.responsetime: true
 http.skip.robots: false
-parser.emitOutlinks: true
-parser.emitOutlinks.max.per.page: 1000
+parser.emitOutlinks: false
 
 # FileSpout configuration  
 spout.absolutepath: false
@@ -88,53 +88,4 @@ urlfilters:
     params:
       maxPathRepetition: 5
       maxLength: 2048
-
-# Parse Filters - capture all content
-parsefilters:
-  - class: "com.digitalpebble.stormcrawler.parse.filter.ContentFilter"
-    name: "ContentFilter"
-    params:
-      pattern: "//BODY"
-      key: "content"
-  - class: "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter"
-    name: "LinkParseFilter"
-    params:
-      pattern: "//A[@href]"
-      key: "links"
-      - key: "title"
-        pattern: "//TITLE"
-      - key: "description"
-        pattern: "//META[@name=\"description\"]/@content"
-      - key: "keywords"
-        pattern: "//META[@name=\"keywords\"]/@content"
-  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
-    name: "XPathFilter"
-    params:
-      - key: "title"
-        pattern: "//TITLE"
-      - key: "description"
-        pattern: "//META[@name=\"description\"]/@content"
-      - key: "keywords"
-        pattern: "//META[@name=\"keywords\"]/@content"
-    name: "LinkParseFilter"
-    params:
-      pattern: "//A[@href]"
-      key: "links"
-  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
-    name: "XPathFilter"
-    params:
-      - key: "title"
-        pattern: "//TITLE"
-      - key: "description"
-        pattern: "//META[@name=\"description\"]/@content"
-      - key: "keywords"
-        pattern: "//META[@name=\"keywords\"]/@content"
-  - class: "com.digitalpebble.stormcrawler.parse.filter.XPathFilter"
-    name: "XPathFilter"
-    params:
-      - key: "title"
-        pattern: "//TITLE"
-      - key: "description"
-        pattern: "//META[@name=\"description\"]/@content"
-      - key: "keywords"
-        pattern: "//META[@name=\"keywords\"]/@content"
+      maxLength: 2048

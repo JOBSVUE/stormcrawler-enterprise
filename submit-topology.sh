@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ARCHITECTURE / SECURITY TODO:
+# - Remove hardcoded JDBC_* secrets; rely on injected env or secret manager.
+# - Derive jar name dynamically (parse target directory) to avoid mismatch.
+# - Add metrics or timing around build & submission; consider skipping rebuild if unchanged.
+# - Implement exponential backoff on submission retries.
 set -euo pipefail
 
 echo "==== STORM CRAWLER TOPOLOGY SUBMISSION SCRIPT ===="

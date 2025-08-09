@@ -123,3 +123,10 @@ storm jar ... -c sql.password="$JDBC_PASS"
 - Elasticsearch 7.17.7 (for storage)
 
 Note: This example uses Elasticsearch for storage. Make sure Elasticsearch is running at the configured address (default: elasticsearch:9200).
+
+## Parsing Enhancements
+- Updated jsoupfilters.json to narrow text extraction (ARTICLE/MAIN/SECTION + content divs).
+- Added exclusion of javascript:, mailto:, tel:, fragment-only links in link extraction XPath.
+- Extended date & author extraction (og:updated_time, itemprop dates).
+- Added lastModified metadata field.
+- Removed explicit jsoup dependency; now using StormCrawler’s tested version (1.16.1 via 2.10).

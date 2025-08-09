@@ -9,10 +9,25 @@
       }
     },
     {
+      "class": "com.digitalpebble.stormcrawler.parse.filter.XPathFilter",
+      "name": "XPathMetadata",
+      "params": {
+        "mappings": [
+          { "key": "title", "value": "//TITLE/text()" },
+          { "key": "description", "value": "//META[@name='description']/@content" },
+          { "key": "keywords", "value": "//META[@name='keywords']/@content" },
+          { "key": "canonical", "value": "//LINK[@rel='canonical']/@href" },
+          { "key": "author", "value": "//META[@name='author']/@content" },
+          { "key": "publishedDate", "value": "//META[@property='article:published_time']/@content" },
+          { "key": "lastModified", "value": "//META[@property='og:updated_time']/@content" }
+        ]
+      }
+    },
+    {
       "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
       "name": "LinkParseFilter",
       "params": {
-        "pattern": "//A[@href]"
+        "pattern": "//A[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"
       }
     },
     {

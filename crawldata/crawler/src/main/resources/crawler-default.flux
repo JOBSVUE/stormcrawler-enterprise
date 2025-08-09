@@ -53,6 +53,7 @@ config:
     - parse.keywords=keywords
     - parse.author=author
     - parse.publishedDate=publishedDate
+    - parse.lastModified=lastModified
     - canonical=canonical
   
   # Connection settings
@@ -62,7 +63,7 @@ config:
   es.client.max.connections.total: 100
 
   # Crawler-specific settings
-  parser.emitOutlinks.max.per.page: 200
+  parser.emitOutlinks: false
   spout.fetch.batch: 80
   spout.min.queue.size: 15
   spout.fetch.interval.ms: 6000
@@ -170,4 +171,5 @@ streams:
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
+      streamId: "status"
       streamId: "status"

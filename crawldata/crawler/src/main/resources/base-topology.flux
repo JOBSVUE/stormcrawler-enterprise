@@ -23,7 +23,8 @@ config:
   sql.show.sql: true
 
   # throttle outlinks (if inherited)
-  parser.emitOutlinks.max.per.page: 200
+  parser.emitOutlinks: false
+  jsoupfilters.config.file: "jsoupfilters.json"
 
 spouts:
   - id: "spout"

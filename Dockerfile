@@ -1,4 +1,4 @@
-# Base Storm image + Maven for building your topology
+
 FROM storm:2.7.0
 
 USER root

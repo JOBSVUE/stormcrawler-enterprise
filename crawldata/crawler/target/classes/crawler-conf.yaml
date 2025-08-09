@@ -8,9 +8,9 @@ config:
   topology.max.spout.pending: 100
   topology.debug: false
 
-  # General StormCrawler settings - ENABLE outlinks for full content capture!
-  parser.emitOutlinks: true
-  parser.emitOutlinks.max.per.page: 200
+  # General StormCrawler settings - DISABLE emitting outlinks
+  parser.emitOutlinks: false
+  # parser.emitOutlinks.max.per.page: 200  # ignored when emitOutlinks=false
   urlfilter.refreshConfigurationInBolt: true
   
   # User agent configuration
@@ -63,6 +63,7 @@ config:
   sitemap.discovery: true
   parsefilters.config.file: "parsefilters.json"
   urlfilters.config.file: "urlfilters.json"
+  jsoupfilters.config.file: "jsoupfilters.json"
   
   # Protocol implementation
   http.protocol.implementation: "com.digitalpebble.stormcrawler.protocol.httpclient.HttpProtocol"
@@ -102,4 +103,5 @@ config:
     - parse.keywords=keywords
     - parse.author=author
     - parse.publishedDate=publishedDate
+    - parse.lastModified=lastModified
     - canonical=canonical

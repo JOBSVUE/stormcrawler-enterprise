@@ -184,3 +184,5 @@ config:
           pattern: "//META[@name=\"description\"]/@content"
         - key: "keywords"
           pattern: "//META[@name=\"keywords\"]/@content"
+
+  parser.emitOutlinks: false

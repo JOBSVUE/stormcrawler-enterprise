@@ -1,4 +1,5 @@
 /crawldata/crawler/src/main/java/com/digitalpebble/DebugBolt.java
+/crawldata/crawler/src/main/java/com/digitalpebble/ParsedMetadataBolt.java
 /crawldata/crawler/src/main/java/com/digitalpebble/SQLStatusUpdaterBolt.java
 /crawldata/crawler/src/main/java/com/digitalpebble/ElasticsearchIndexerBolt.java
 /crawldata/crawler/src/main/java/com/digitalpebble/SimpleOracleSpout.java
