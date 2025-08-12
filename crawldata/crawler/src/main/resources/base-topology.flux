@@ -1,5 +1,10 @@
 name: "base-topology"
 
+includes:
+  - resource: true
+    file: "/crawler-conf.yaml"
+    override: false
+
 config:
   # Required configs that must be provided
   topology.workers: 1
@@ -26,6 +31,10 @@ config:
   parser.emitOutlinks: false
   jsoupfilters.config.file: "jsoupfilters.json"
 
+  # Fallbacks (will be overridden by crawler-conf.yaml include)
+  http.agent.name: "StormCrawler Enterprise"
+  es.indexer.addresses: ["http://elasticsearch:9200"]
+
 spouts:
   - id: "spout"
     className: "com.digitalpebble.SimpleOracleSpout"
@@ -48,6 +57,9 @@ bolts:
   - id: "status"
     className: "com.digitalpebble.SQLStatusUpdaterBolt"
     parallelism: 2
+  - id: "extractor"
+    className: "com.digitalpebble.ParsedMetadataBolt"
+    parallelism: 1
 
 streams:
   # Correct ingestion + fetch
@@ -56,12 +68,20 @@ streams:
     grouping:
       type: SHUFFLE
 
-  # Fetcher -> sitemap + parser (direct content)
+  # Fetcher -> sitemap
   - from: "fetcher"
     to: "sitemap"
     grouping:
       type: LOCAL_OR_SHUFFLE
+
+  # Fetcher -> extractor (replace direct fetcher->parse)
   - from: "fetcher"
+    to: "extractor"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # Extractor -> parse
+  - from: "extractor"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE

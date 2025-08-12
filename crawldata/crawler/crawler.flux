@@ -104,6 +104,10 @@ bolts:
     className: "com.digitalpebble.DebugBolt"
     parallelism: 1
 
+  - id: "extractor"
+    className: "com.digitalpebble.ParsedMetadataBolt"
+    parallelism: 1
+
 streams:
   # Main processing flow
   - from: "spout"
@@ -128,12 +132,12 @@ streams:
       type: LOCAL_OR_SHUFFLE
 
   - from: "fetcher"
-    to: "parse"
+    to: "extractor"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  - from: "parse"
-    to: "index"
+  - from: "extractor"
+    to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 

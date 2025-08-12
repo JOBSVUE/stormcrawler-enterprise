@@ -1,0 +1,122 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 \
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- Coordinates -->
+  <groupId>com.mycompany</groupId>
+  <artifactId>crawldata</artifactId>
+  <version>1.0</version>
+  <packaging>jar</packaging>
+
+  <!-- Java and Storm versions -->
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <java.version>11</java.version>
+    <stormcrawler.version>2.10</stormcrawler.version>
+    <storm.version>2.7.0</storm.version>
+  </properties>
+
+  <!-- Dependencies -->
+  <dependencies>
+    <!-- StormCrawler Core: spout, bolts, util classes -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-core</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+    
+    <!-- Elasticsearch Indexer Bolt -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-elasticsearch</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+
+    <!-- URL Frontier Spout and Status Updater Bolt -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-urlfrontier</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+
+    <!-- Oracle JDBC Status Updater Bolt -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-sql</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+
+    <!-- Apache Storm Core API (provided by runtime) -->
+    <dependency>
+      <groupId>org.apache.storm</groupId>
+      <artifactId>storm-core</artifactId>
+      <version>${storm.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Flux for YAML-based topologies -->
+    <dependency>
+      <groupId>org.apache.storm</groupId>
+      <artifactId>flux-core</artifactId>
+      <version>${storm.version}</version>
+    </dependency>
+
+    <!-- Tika parsing integration -->
+    <dependency>
+      <groupId>com.digitalpebble.stormcrawler</groupId>
+      <artifactId>storm-crawler-tika</artifactId>
+      <version>${stormcrawler.version}</version>
+    </dependency>
+    
+    <!-- If Oracle JDBC is needed -->
+    <dependency>
+        <groupId>com.oracle.database.jdbc</groupId>
+        <artifactId>ojdbc8</artifactId>
+        <version>19.8.0.0</version>
+    </dependency>
+  </dependencies>
+
+  <!-- Build configuration -->
+  <build>
+    <plugins>
+      <!-- Compile Java 11 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.10.1</version>
+        <configuration>
+          <source>${java.version}</source>
+          <target>${java.version}</target>
+        </configuration>
+      </plugin>
+
+      <!-- Create an Uber-JAR with all dependencies -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.6.0</version>
+        <configuration>
+          <descriptorRefs>
+            <descriptorRef>jar-with-dependencies</descriptorRef>
+          </descriptorRefs>
+          <archive>
+            <manifest>
+              <mainClass>org.apache.storm.flux.Flux</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+        <executions>
+          <execution>
+            <id>make-assembly</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

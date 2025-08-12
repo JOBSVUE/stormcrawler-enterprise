@@ -89,3 +89,8 @@ urlfilters:
       maxPathRepetition: 5
       maxLength: 2048
       maxLength: 2048
+
+# External extractor (FastAPI/trafilatura)
+extractor.service.url: "http://extractor:8000/extract"
+extractor.timeout.ms: 15000
+extractor.min.extracted.chars: 50

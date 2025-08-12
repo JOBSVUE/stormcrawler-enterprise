@@ -1,7 +1,7 @@
 {
   "com.digitalpebble.stormcrawler.parse.JSoupFilters": [
     {
-      "class": "com.digitalpebble.stormcrawler.jsoup.XPathFilter",
+      "class": "com.digitalpebble.stormcrawler.parse.filter.XPathFilter",
       "name": "XPathFilter",
       "params": {
         "canonical": "//link[@rel='canonical']/@href",
@@ -22,9 +22,9 @@
         ],
         "parse.author": [
           "//meta[@name='author']/@content",
-            "//meta[@name='Author']/@content",
-            "//*[@itemprop='author']/@content",
-            "//*[@itemprop='author']//text()"
+          "//meta[@name='Author']/@content",
+          "//*[@itemprop='author']/@content",
+          "//*[@itemprop='author']//text()"
         ],
         "parse.publishedDate": [
           "//meta[@property='article:published_time']/@content",
@@ -45,21 +45,20 @@
       }
     },
     {
-      "class": "com.digitalpebble.stormcrawler.jsoup.TextExtractionFilter",
-      "name": "TextExtractionFilter",
+      "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
+      "name": "LinkParseFilter",
       "params": {
-        "includePattern": [
-          "ARTICLE",
-          "MAIN",
-          "SECTION",
-          "DIV[id~=(?i)(content|article|main|body|page)]",
-          "BODY"
-        ],
-        "excludePattern": [
-          "SCRIPT",
-          "STYLE",
-          "NOSCRIPT",
-          "HEADER",
+        "pattern": "//a[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"
+      }
+    }
+  ]
+}
+      "params": {
+        "pattern": "//a[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"
+      }
+    }
+  ]
+}
           "FOOTER",
           "NAV",
           "FORM"

@@ -1,4 +1,5 @@
 com/digitalpebble/DebugBolt.class
 com/digitalpebble/SQLStatusUpdaterBolt.class
+com/digitalpebble/ParsedMetadataBolt.class
 com/digitalpebble/SimpleOracleSpout.class
 com/digitalpebble/SQLStatusUpdaterBolt$1.class

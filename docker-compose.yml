@@ -1,4 +1,3 @@
-
 version: "3.8"
 
 services:
@@ -133,6 +132,7 @@ services:
       - nimbus
       - elasticsearch
       - oracle-test
+      - extractor
     environment:
       - MAVEN_REPO_LOCAL=/crawldata/.repository
       # Oracle connection credentials as environment variables
@@ -146,6 +146,20 @@ services:
       - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/worker.log4j2.properties
     command: >
       bash -c "/crawldata/submit-topology.sh"
+
+  # ------------------------
+  # Extractor (FastAPI / trafilatura)
+  # ------------------------
+  extractor:
+    build:
+      context: .
+      dockerfile: extractor/Dockerfile
+    container_name: extractor
+    environment:
+      - PORT=8000
+    ports:
+      - "8000:8000"   # optional, useful for manual checks
+    restart: always
 
   # ------------------------
   # Frontier (if you still need it)

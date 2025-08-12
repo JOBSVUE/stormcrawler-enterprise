@@ -105,3 +105,8 @@ config:
     - parse.publishedDate=publishedDate
     - parse.lastModified=lastModified
     - canonical=canonical
+
+  # External extractor (FastAPI/trafilatura) settings
+  extractor.service.url: "http://extractor:8000/extract"
+  extractor.timeout.ms: 15000
+  extractor.min.extracted.chars: 50

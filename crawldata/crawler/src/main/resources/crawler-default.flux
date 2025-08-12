@@ -104,6 +104,10 @@ bolts:
     className: "com.digitalpebble.DebugBolt"
     parallelism: 1
 
+  - id: "extractor"
+    className: "com.digitalpebble.ParsedMetadataBolt"
+    parallelism: 1
+
 streams:
   # From spout to URL partitioner
   - from: "spout"
@@ -136,8 +140,14 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # From fetcher directly to content parser (for non-sitemap content)
+  # From fetcher to extractor (replace direct fetcher->parse)
   - from: "fetcher"
+    to: "extractor"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # From extractor to content parser
+  - from: "extractor"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
@@ -163,6 +173,16 @@ streams:
 
   - from: "parse"
     to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
+
+  - from: "index"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
+      streamId: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"

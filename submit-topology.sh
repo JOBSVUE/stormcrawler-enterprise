@@ -44,6 +44,7 @@ echo "Waiting for dependencies to be ready…"
 wait_for_port oracle-test 1521 "Oracle database"
 wait_for_port elasticsearch 9200 "Elasticsearch"
 wait_for_port nimbus 6627 "Storm Nimbus"
+wait_for_port extractor 8000 "Extractor API"
 
 # 5) Submit the topology with retries
 echo "Submitting topology to Storm…"
@@ -58,7 +59,7 @@ until storm jar \
     -c sql.user="${JDBC_USER}" \
     -c sql.password="${JDBC_PASS}" \
     -c sql.status.table="crawl_queue" \
-    crawler.flux
+    src/main/resources/base-topology.flux
 do
   retry_count=$((retry_count + 1))
   if [ "$retry_count" -ge "$max_retries" ]; then
