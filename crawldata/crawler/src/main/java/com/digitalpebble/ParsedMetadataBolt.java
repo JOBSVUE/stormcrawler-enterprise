@@ -153,12 +153,22 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                     JsonNode root = mapper.readTree(resp.body());
                     String content = textOrNull(root, "content");
                     String title = textOrNull(root, "title");
-
+                    String seoDesc = textOrNull(root, "seo_description");
+                    String companyId = textOrNull(root, "company_id");
+                    if (companyId == null || companyId.isBlank()) companyId = url;
+                    if (companyId != null) metadata.addValue("company_id", companyId);
+                    if (seoDesc != null && !seoDesc.isBlank()) {
+                        metadata.addValue("seo_description", seoDesc);
+                        // also copy to parse.description to reuse existing ES mapping -> description
+                        metadata.addValue("parse.description", seoDesc);
+                    }
                     if (content != null && content.length() >= minChars) {
                         byte[] extractedBytes = content.getBytes(detectCharset(metadata));
                         if (title != null && !title.isBlank()) {
                             metadata.addValue("parse.title", title);
                         }
+                        // optional: mirror main content into a metadata field for separate indexing
+                        metadata.addValue("contents", content);
                         metadata.addValue("extraction.method", "renderer+trafilatura");
                         metadata.addValue("extraction.length", Integer.toString(content.length()));
                         metadata.addValue("extraction.status", "200");
@@ -201,12 +211,21 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                 JsonNode root = mapper.readTree(resp.body());
                 String content = textOrNull(root, "content");
                 String title = textOrNull(root, "title");
-
+                String seoDesc = textOrNull(root, "seo_description");
+                String companyId = textOrNull(root, "company_id");
+                if (companyId == null || companyId.isBlank()) companyId = url;
+                if (companyId != null) metadata.addValue("company_id", companyId);
+                if (seoDesc != null && !seoDesc.isBlank()) {
+                    metadata.addValue("seo_description", seoDesc);
+                    metadata.addValue("parse.description", seoDesc);
+                }
                 if (content != null && content.length() >= minChars) {
                     byte[] extractedBytes = content.getBytes(detectCharset(metadata));
                     if (title != null && !title.isBlank()) {
                         metadata.addValue("parse.title", title);
                     }
+                    // optional: mirror main content into a metadata field for separate indexing
+                    metadata.addValue("contents", content);
                     metadata.addValue("extraction.method", "trafilatura");
                     metadata.addValue("extraction.length", Integer.toString(content.length()));
                     metadata.addValue("extraction.status", "200");

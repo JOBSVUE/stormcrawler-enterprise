@@ -29,10 +29,13 @@ import time
 import concurrent.futures
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, urlunparse
+import os
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
+
+from .seo_description import extract_meta_description, generate_description
 
 # Ensure trafilatura is available
 try:
@@ -45,6 +48,9 @@ except Exception:
 MAX_HTML_LENGTH = 1_000_000        # characters
 EXTRACTION_TIMEOUT = 15           # seconds
 MIN_EXTRACTED_CHARS = 50
+# SEO description config
+SEO_DESC_MODE = os.getenv("SEO_DESC_MODE", "c").lower()         # 'a' | 'b' | 'c'
+SEO_DESC_MAX_CHARS = int(os.getenv("SEO_DESC_MAX_CHARS", "160"))
 
 logger = logging.getLogger("extract_api_rest")
 logging.basicConfig(level=logging.INFO)
@@ -71,6 +77,7 @@ class ExtractResponse(BaseModel):
     company_id: Optional[str] = None
     title: Optional[str] = None
     content: str
+    seo_description: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     extraction_metadata: Dict[str, Any]
     timestamp: int
@@ -191,6 +198,15 @@ async def extract_endpoint(payload: ExtractRequest):
     if not title and payload.fetch_metadata:
         title = (payload.fetch_metadata.get("title") or "").strip()
 
+    # SEO description: prefer meta tags in HTML, otherwise generate per strategy
+    seo_desc_source = None
+    seo_desc = extract_meta_description(html, max_chars=SEO_DESC_MAX_CHARS)
+    if seo_desc:
+        seo_desc_source = "meta"
+    else:
+        seo_desc, gen_src = generate_description(text_content, mode=SEO_DESC_MODE, max_chars=SEO_DESC_MAX_CHARS)
+        seo_desc_source = gen_src
+
     extraction_metadata = {
         "method": "trafilatura",
         "trafilatura": {
@@ -209,6 +225,14 @@ async def extract_endpoint(payload: ExtractRequest):
         "character_count": len(text_content),
         "received_html_chars": len(html),
     }
+    # Attach SEO description provenance
+    if seo_desc:
+        extraction_metadata["seo_description"] = {
+            "source": seo_desc_source,
+            "length": len(seo_desc),
+            "max_chars": SEO_DESC_MAX_CHARS,
+            "mode": SEO_DESC_MODE,
+        }
 
     timestamp_ms = int(time.time() * 1000)
     document_id = _doc_id_for(payload.company_id, str(payload.url))
@@ -216,9 +240,10 @@ async def extract_endpoint(payload: ExtractRequest):
     response_doc = {
         "document_id": document_id,
         "url": str(payload.url),
-        "company_id": payload.company_id,
+        "company_id": payload.company_id or str(payload.url),
         "title": title or None,
         "content": text_content,
+        "seo_description": seo_desc or None,
         "metadata": payload.metadata or {},
         "extraction_metadata": extraction_metadata,
         "timestamp": timestamp_ms,
@@ -231,4 +256,4 @@ if __name__ == "__main__":
     import uvicorn
     import os
     # Run with: python app.py
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), log_level="info")
+    uvicorn.run("extractor.app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), log_level="info")
