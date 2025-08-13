@@ -27,7 +27,7 @@ CREATE INDEX idx_crawl_queue_nextfetch ON crawl_queue(nextfetchdate);
 -- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('http://books.toscrape.com/', 'NEW', SYSTIMESTAMP, 'books.toscrape.com');
 -- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://yjc.ir/en', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 -- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/religion', 'NEW', SYSTIMESTAMP, 'yjc.ir');
-INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/52129/al-nujaba-spox-the-american-attack-on-border-guards-was-in-response-to-pmf-military-parade-and-was-aimed-at-reviving-daesh', 'NEW', SYSTIMESTAMP, 'yjc.ir');
+INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://ai-ark.com/', 'NEW', SYSTIMESTAMP, 'ai-ark.com');
 --INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/50967/international-quran-competition-wraps-up-in-tehran', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 --INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/51053/iran-calls-for-muslim-unity-against-west%E2%80%99s-islamophobia-campaign', 'NEW', SYSTIMESTAMP, 'yjc.ir');
 

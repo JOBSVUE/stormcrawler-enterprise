@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${PORT:-8000}"
-WORKERS="${WORKERS:-2}"
-LOG_LEVEL="${LOG_LEVEL:-info}"
+PORT="${PORT:-8001}"
+HOST="${HOST:-0.0.0.0}"
+WORKERS="${WORKERS:-1}"
 
-exec uvicorn extractor.app:app \
-  --host 0.0.0.0 \
-  --port "${PORT}" \
-  --workers "${WORKERS}" \
-  --log-level "${LOG_LEVEL}" \
-  --timeout-keep-alive 5
+exec uvicorn app:app --host "${HOST}" --port "${PORT}" --workers "${WORKERS}" --loop asyncio --timeout-keep-alive 5

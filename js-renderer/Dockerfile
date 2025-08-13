@@ -1,34 +1,39 @@
-FROM python:3.11-slim
+# Use a modern Python base. Default port set to 8001 to avoid extractor's 8000.
+FROM python:3.12-bookworm
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    PORT=8001 \
+    HEADLESS=1 \
+    BROWSER=chromium
+
+# Install minimal OS deps; playwright install --with-deps will add browser deps too
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    gnupg \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# System utilities for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-  && rm -rf /var/lib/apt/lists/*
+# install python deps
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Install Python deps
-COPY extractor/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.txt
+# Install playwright browsers and required OS deps in one step
+RUN python -m playwright install --with-deps
 
-# Copy app
-COPY extractor /app/extractor
-COPY extractor/entrypoint.sh /app/entrypoint.sh
+# Copy application files
+COPY app.py /app/app.py
+COPY entrypoint.sh /app/entrypoint.sh
+
 RUN chmod +x /app/entrypoint.sh
 
-# Non-root user
-RUN groupadd -g 10001 app && useradd -m -u 10001 -g app appuser
-RUN chown -R appuser:app /app
-USER appuser
-
-EXPOSE 8000
-ENV PORT=8000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+EXPOSE ${PORT}
 
 ENTRYPOINT ["/app/entrypoint.sh"]

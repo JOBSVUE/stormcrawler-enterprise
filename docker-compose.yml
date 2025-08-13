@@ -133,6 +133,7 @@ services:
       - elasticsearch
       - oracle-test
       - extractor
+      - js-renderer
     environment:
       - MAVEN_REPO_LOCAL=/crawldata/.repository
       # Oracle connection credentials as environment variables
@@ -160,6 +161,25 @@ services:
     ports:
       - "8000:8000"   # optional, useful for manual checks
     restart: always
+
+  # ------------------------
+  # JS Renderer (for rendering JavaScript content)
+  # ------------------------
+  js-renderer:
+    build:
+      context: ./js-renderer
+      dockerfile: Dockerfile
+    container_name: js-renderer
+    environment:
+      - PORT=8001
+      - EXTRACTOR_URL=http://extractor:8000/extract
+      - HEADLESS=1
+      - BROWSER=chromium
+    ports:
+      - "8001:8001"
+    restart: always
+    depends_on:
+      - extractor
 
   # ------------------------
   # Frontier (if you still need it)

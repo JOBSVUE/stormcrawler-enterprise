@@ -111,3 +111,7 @@ config:
   extractor.timeout.ms: 15000
   extractor.min.extracted.chars: 50
   extractor.max.html.chars: 900000
+
+  # JS renderer + extractor chain (preferred)
+  renderer.service.url: "http://js-renderer:8001/render_and_extract"
+  renderer.timeout.ms: 30000
