@@ -8,14 +8,17 @@ set -euo pipefail
 
 echo "==== STORM CRAWLER TOPOLOGY SUBMISSION SCRIPT ===="
 
+# Topology name (override with TOPOLOGY_NAME env)
+TOPOLOGY_NAME="${TOPOLOGY_NAME:-stormcrawler-enterprise}"
+
 # 1) Make sure we're in the crawler directory
 cd /crawldata/crawler
 
 # 2) Kill existing topology if it exists
-echo "Checking for existing topology..."
-if storm list | grep -q "crawler"; then
-    echo "Found existing topology, killing it..."
-    storm kill crawler -w 10 || true
+echo "Checking for existing topology '${TOPOLOGY_NAME}'..."
+if storm list | grep -wq "${TOPOLOGY_NAME}"; then
+    echo "Found existing topology '${TOPOLOGY_NAME}', killing it..."
+    storm kill "${TOPOLOGY_NAME}" -w 10 || true
     sleep 15
 fi
 

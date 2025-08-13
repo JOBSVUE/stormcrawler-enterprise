@@ -6,7 +6,7 @@
 # - Consider adding metrics consumer & lowering log verbosity.
 # - Frontier service present but unused; remove if Oracle-only.
 # - Evaluate setting nextfetchdate for NEW to avoid immediate reselect loops.
-name: "crawler"
+name: "stormcrawler-enterprise"
 
 includes:
   - resource: true

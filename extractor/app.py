@@ -148,6 +148,19 @@ async def extract_endpoint(payload: ExtractRequest):
     if not html:
         raise HTTPException(status_code=400, detail="html_content must be provided and non-empty")
 
+    # Optional: short-circuit if caller told us the content-type is not HTML/XML
+    ctype = None
+    if payload.fetch_metadata:
+        ctype = payload.fetch_metadata.get("content_type") or payload.fetch_metadata.get("Content-Type")
+    if ctype and ("html" not in ctype.lower() and "xml" not in ctype.lower()):
+        logger.info("Non-HTML content-type %s for %s; returning 204", ctype, payload.url)
+        return JSONResponse(status_code=204, content=None)
+
+    # Quick heuristic: reject if doesn't look like HTML
+    if "<" not in html:
+        logger.info("html_content doesn't look like HTML for %s; returning 204", payload.url)
+        return JSONResponse(status_code=204, content=None)
+
     if len(html) > MAX_HTML_LENGTH:
         # Defensive: avoid feeding extremely large inputs
         raise HTTPException(status_code=400, detail=f"html_content exceeds maximum allowed length of {MAX_HTML_LENGTH}")
@@ -194,6 +207,7 @@ async def extract_endpoint(payload: ExtractRequest):
         "extraction_time": time.time(),
         "word_count": len(text_content.split()),
         "character_count": len(text_content),
+        "received_html_chars": len(html),
     }
 
     timestamp_ms = int(time.time() * 1000)

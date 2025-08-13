@@ -130,3 +130,43 @@ Note: This example uses Elasticsearch for storage. Make sure Elasticsearch is ru
 - Extended date & author extraction (og:updated_time, itemprop dates).
 - Added lastModified metadata field.
 - Removed explicit jsoup dependency; now using StormCrawler’s tested version (1.16.1 via 2.10).
+
+## Data Flow Architecture
+
+```mermaid
+flowchart TD
+  subgraph Storage
+    ORA[(Oracle\ncrawl_queue)]
+    ES[(Elasticsearch\nindex: content)]
+  end
+
+  Spout[SimpleOracleSpout\n(reads NEW/DISCOVERED)] --> Fetcher[FetcherBolt]
+  Fetcher -->|sitemaps| Sitemap[SiteMapParserBolt]
+  Fetcher --> Extractor[ParsedMetadataBolt\n(FastAPI/trafilatura)]
+  Sitemap --> Parse[JSoupParserBolt]
+  Extractor --> Parse
+  Parse --> Indexer[IndexerBolt]
+  Indexer --> ES
+
+  %% Status side-streams
+  Fetcher -. status .-> Status[SQLStatusUpdaterBolt]
+  Sitemap -. status .-> Status
+  Parse -. status .-> Status
+  Indexer -. status .-> Status
+  Status --> ORA
+
+  %% Optional (in crawler.flux)
+  Spout -. optional .-> Partitioner[URLPartitionerBolt]
+  Partitioner -. optional .-> Fetcher
+```
+
+Legend:
+- SimpleOracleSpout selects URLs from Oracle with status NEW/DISCOVERED and due nextfetchdate.
+- ParsedMetadataBolt calls the external extractor service and enriches Metadata.
+- JSoupParserBolt performs parsing/metadata extraction.
+- IndexerBolt writes documents to Elasticsearch.
+- SQLStatusUpdaterBolt consumes status side-streams and upserts into Oracle (nextfetchdate backoff).
+
+Notes:
+- parser.emitOutlinks=false, so no outlink expansion is emitted.
+- URLPartitionerBolt is present in crawler.flux (optional), not in base-topology.flux.

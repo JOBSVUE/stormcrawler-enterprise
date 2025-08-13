@@ -7,9 +7,10 @@ import org.slf4j.LoggerFactory;
 // Use standard Jackson (provided by crawler/pom.xml)
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import org.apache.storm.tuple.Tuple;
 // Storm bolt imports
+import org.apache.storm.tuple.Tuple;
 import org.apache.storm.topology.base.BaseRichBolt;
 import org.apache.storm.task.OutputCollector;
 import org.apache.storm.task.TopologyContext;
@@ -45,6 +46,7 @@ public class ParsedMetadataBolt extends BaseRichBolt {
     private String extractorUrl;
     private int timeoutMs;
     private int minChars;
+    private int maxHtmlChars; // new: cap HTML size sent to extractor
 
     @Override
     public void prepare(Map<String, Object> stormConf, TopologyContext context, OutputCollector collector) {
@@ -57,9 +59,10 @@ public class ParsedMetadataBolt extends BaseRichBolt {
         this.extractorUrl = getString(stormConf, "extractor.service.url", "http://extractor:8000/extract");
         this.timeoutMs = getInt(stormConf, "extractor.timeout.ms", 15000);
         this.minChars = getInt(stormConf, "extractor.min.extracted.chars", 50);
+        this.maxHtmlChars = getInt(stormConf, "extractor.max.html.chars", 900000);
 
-        LOG.info("External extractor bolt configured. extractorUrl={}, timeoutMs={}, minChars={}",
-                extractorUrl, timeoutMs, minChars);
+        LOG.info("External extractor bolt configured. extractorUrl={}, timeoutMs={}, minChars={}, maxHtmlChars={}",
+                extractorUrl, timeoutMs, minChars, maxHtmlChars);
     }
 
     @Override
@@ -76,13 +79,57 @@ public class ParsedMetadataBolt extends BaseRichBolt {
         String html = readHtml(tuple, metadata);
         if (html == null || html.isEmpty()) {
             LOG.debug("Empty HTML for URL {}, passing through", url);
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "empty_html");
             collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
             collector.ack(tuple);
             return;
         }
 
+        // Record input info
+        String ctype = firstNonEmpty(
+                metadata.getFirstValue("Content-Type"),
+                metadata.getFirstValue("parse.Content-Type"),
+                metadata.getFirstValue("http.content.type"));
+        if (ctype != null) metadata.addValue("extraction.input.contentType", ctype);
+
+        // Skip non-HTML content (e.g., PDFs, images)
+        if (ctype != null && !ctype.toLowerCase().contains("html") && !ctype.toLowerCase().contains("xml")) {
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "non_html_content");
+            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+            collector.ack(tuple);
+            return;
+        }
+
+        // Basic heuristic: ensure it's likely HTML
+        boolean looksHtml = html.indexOf('<') >= 0; // cheap check
+        if (!looksHtml) {
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "content_not_html_like");
+            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+            collector.ack(tuple);
+            return;
+        }
+
+        // Sanitize NULs/control that may break JSON parsers
+        if (html.indexOf('\u0000') >= 0) {
+            html = html.replace("\u0000", "");
+        }
+
+        // Cap very large HTML payloads to avoid 400 from extractor
+        boolean truncated = false;
+        if (html.length() > maxHtmlChars) {
+            html = html.substring(0, maxHtmlChars);
+            truncated = true;
+        }
+        metadata.addValue("extraction.input.length", Integer.toString(html.length()));
+        if (truncated) {
+            metadata.addValue("extraction.truncated", "true");
+        }
+
         try {
-            String payload = toJsonPayload(url, html);
+            String payload = toJsonPayload(url, html, metadata);
             HttpRequest req = HttpRequest.newBuilder(URI.create(extractorUrl))
                     .timeout(Duration.ofMillis(timeoutMs))
                     .header("Content-Type", "application/json")
@@ -103,21 +150,34 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                         metadata.addValue("parse.title", title);
                     }
                     metadata.addValue("extraction.method", "trafilatura");
+                    metadata.addValue("extraction.length", Integer.toString(content.length()));
+                    metadata.addValue("extraction.status", "200");
                     collector.emit(tuple, new Values(url, extractedBytes, metadata));
                 } else {
                     LOG.debug("Extractor returned too-short/empty content for URL {}", url);
+                    metadata.addValue("extraction.method", "fallback");
+                    metadata.addValue("extraction.reason", "too_short_or_empty");
+                    metadata.addValue("extraction.status", "200");
                     collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
                 }
             } else if (code == 204) {
                 LOG.debug("Extractor 204 No Content for URL {}", url);
+                metadata.addValue("extraction.method", "fallback");
+                metadata.addValue("extraction.reason", "http_204");
+                metadata.addValue("extraction.status", "204");
                 collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
             } else {
                 LOG.warn("Extractor HTTP {} for URL {}. Body: {}", code, url, resp.body());
+                metadata.addValue("extraction.method", "fallback");
+                metadata.addValue("extraction.reason", "http_" + code);
+                metadata.addValue("extraction.status", Integer.toString(code));
                 collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
             }
             collector.ack(tuple);
         } catch (Exception e) {
             LOG.warn("Extractor call failed for URL {}: {}", url, e.toString());
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "exception");
             collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
             collector.ack(tuple);
         }
@@ -171,9 +231,51 @@ public class ParsedMetadataBolt extends BaseRichBolt {
     /**
      * Minimal JSON payload builder.
      */
-    private static String toJsonPayload(String url, String html) {
+    private String toJsonPayload(String url, String html) {
         // Minimal JSON builder
         return "{\"url\":\"" + escape(url) + "\",\"html_content\":\"" + escape(html) + "\"}";
+    }
+
+    /**
+     * Minimal JSON payload builder using Jackson; includes fetch_metadata hints if available.
+     */
+    private String toJsonPayload(String url, String html, Metadata md) {
+        try {
+            ObjectNode root = mapper.createObjectNode();
+            root.put("url", url);
+            root.put("html_content", html);
+
+            // Optional: pass through a company_id if present in metadata
+            String companyId = md.getFirstValue("company_id");
+            if (companyId != null && !companyId.isBlank()) {
+                root.put("company_id", companyId);
+            }
+
+            // Optional: send minimal fetch_metadata to improve title fallback on server
+            ObjectNode fetchMeta = mapper.createObjectNode();
+            String title = firstNonEmpty(md.getFirstValue("parse.title"), md.getFirstValue("title"));
+            if (title != null && !title.isBlank()) fetchMeta.put("title", title);
+            String contentType = firstNonEmpty(md.getFirstValue("Content-Type"), md.getFirstValue("parse.Content-Type"));
+            if (contentType != null && !contentType.isBlank()) fetchMeta.put("content_type", contentType);
+            String statusCode = md.getFirstValue("fetch.statusCode");
+            if (statusCode != null && !statusCode.isBlank()) fetchMeta.put("statusCode", statusCode);
+            Charset cs = detectCharset(md);
+            if (cs != null) fetchMeta.put("charset", cs.displayName());
+            if (!fetchMeta.isEmpty()) root.set("fetch_metadata", fetchMeta);
+
+            return mapper.writeValueAsString(root);
+        } catch (Exception e) {
+            // Fallback to minimal JSON if serialization fails
+            LOG.debug("Failed to build rich JSON payload, falling back: {}", e.toString());
+            return toJsonPayload(url, html);
+        }
+    }
+
+    // Small helper
+    private static String firstNonEmpty(String... vals) {
+        if (vals == null) return null;
+        for (String v : vals) if (v != null && !v.isBlank()) return v;
+        return null;
     }
 
     /**

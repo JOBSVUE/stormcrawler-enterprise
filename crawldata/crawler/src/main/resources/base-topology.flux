@@ -1,4 +1,4 @@
-name: "base-topology"
+name: "stormcrawler-enterprise"
 
 includes:
   - resource: true

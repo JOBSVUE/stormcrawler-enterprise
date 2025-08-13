@@ -110,3 +110,4 @@ config:
   extractor.service.url: "http://extractor:8000/extract"
   extractor.timeout.ms: 15000
   extractor.min.extracted.chars: 50
+  extractor.max.html.chars: 900000
