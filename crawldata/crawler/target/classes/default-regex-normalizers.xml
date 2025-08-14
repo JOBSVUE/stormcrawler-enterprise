@@ -28,48 +28,48 @@
 <regex-normalize>
 
 <!-- removes session ids from urls (such as jsessionid and PHPSESSID) -->
-<!--<regex>-->
-  <!--<pattern>(?i)(;?\b_?(l|j|bv_)?(sid|phpsessid|sessionid)=.*?)(\?|&amp;|#|$)</pattern>-->
-  <!--<substitution>$4</substitution>-->
-<!--</regex>-->
-
-<!-- changes default pages into standard for /index.html, etc. into /
 <regex>
-  <pattern>/((?i)index|default)\.((?i)js[pf]{1}?[afx]?|cgi|cfm|asp[x]?|[psx]?htm[l]?|php[3456]?)(\?|&amp;|#|$)</pattern>
-  <substitution>/$3</substitution>
-</regex> -->
+  <pattern>(?i)(;?\b_?(l|j|bv_)?(sid|phpsessid|sessionid)=.*?)(\?|&amp;|#|$)</pattern>
+  <substitution>$4</substitution>
+</regex>
 
 <!-- removes interpage href anchors such as site.com#location -->
-<!--<regex>-->
-  <!--<pattern>#.*?(\?|&amp;|$)</pattern>-->
-  <!--<substitution>$1</substitution>-->
-<!--</regex>-->
+<regex>
+  <pattern>#.*?(\?|&amp;|$)</pattern>
+  <substitution>$1</substitution>
+</regex>
 
 <!-- cleans ?&amp;var=value into ?var=value -->
-<!--<regex>-->
-  <!--<pattern>\?&amp;</pattern>-->
-  <!--<substitution>\?</substitution>-->
-<!--</regex>-->
+<regex>
+  <pattern>\?&amp;</pattern>
+  <substitution>\?</substitution>
+</regex>
 
 <!-- cleans multiple sequential ampersands into a single ampersand -->
-<!--<regex>-->
-  <!--<pattern>&amp;{2,}</pattern>-->
-  <!--<substitution>&amp;</substitution>-->
-<!--</regex>-->
+<regex>
+  <pattern>&amp;{2,}</pattern>
+  <substitution>&amp;</substitution>
+</regex>
 
-<!-- removes trailing ? -->
-<!--<regex>-->
-  <!--<pattern>[\?&amp;\.]$</pattern>-->
-  <!--<substitution></substitution>-->
-<!--</regex>-->
+<!-- removes trailing ? and & -->
+<regex>
+  <pattern>[\?&amp;]$</pattern>
+  <substitution></substitution>
+</regex>
 
-<!-- Removes query strings -->
-<!--<regex>-->
-    <!--<pattern>\?.*$</pattern>-->
-    <!--<substitution></substitution>-->
-<!--</regex>-->
+<!-- Remove common tracking parameters -->
+<regex>
+  <pattern>[?&amp;](utm_source|utm_medium|utm_campaign|utm_content|utm_term|gclid|fbclid|_ga|_gid|_gat)=[^&amp;]*(&amp;|$)</pattern>
+  <substitution>$2</substitution>
+</regex>
 
 <!-- removes duplicate slashes -->
+<regex>
+  <pattern>(?&lt;!:)/{2,}</pattern>
+  <substitution>/</substitution>
+</regex>
+
+</regex-normalize>
 <!--<regex>-->
   <!--<pattern>(?&lt;!:)/{2,}</pattern>-->
   <!--<substitution>/</substitution>-->

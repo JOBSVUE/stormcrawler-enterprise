@@ -30,6 +30,9 @@ import concurrent.futures
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, urlunparse
 import os
+import re
+from collections import Counter
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -78,6 +81,7 @@ class ExtractResponse(BaseModel):
     title: Optional[str] = None
     content: str
     seo_description: Optional[str] = None
+    keywords: Optional[list[str]] = None
     metadata: Optional[Dict[str, Any]] = None
     extraction_metadata: Dict[str, Any]
     timestamp: int
@@ -141,6 +145,136 @@ def startup_event():
         # Do not raise here — allow container to start but endpoint will fail with 500 if used.
     else:
         logger.info("Trafilatura is available; extractor ready.")
+
+
+# --- Keywords helpers (no heavy deps) ---
+_STOPWORDS = {
+    "the","and","for","with","from","that","this","your","you","are","was","were","will","shall","have","has",
+    "into","our","out","over","under","their","there","here","about","after","before","more","most","other",
+    "than","then","also","can","use","using","used","via","by","on","in","to","of","a","an","as","at","it",
+    "is","be","or","not","we","us","they","he","she","his","her","them","its"
+}
+
+def _kw_parse_list(s: str) -> list[str]:
+    s = (s or "").strip()
+    if not s:
+        return []
+    # split on common separators
+    parts = re.split(r"[,\|\n;\t•]+", s)
+    out = []
+    for p in parts:
+        p = re.sub(r"[^\w\s\-]", " ", p)
+        p = re.sub(r"[-_]+", " ", p).strip().lower()
+        if 2 <= len(p) <= 100 and p not in ("keyword","keywords","tag","tags"):
+            out.append(p)
+    # de-dup preserving order
+    seen = set()
+    uniq = []
+    for k in out:
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(k)
+    return uniq
+
+def _kw_from_meta(html: str) -> list[str]:
+    kws = []
+    for meta in re.findall(r"<meta\b[^>]*>", html or "", flags=re.I):
+        attrs = dict(re.findall(r'(\w[\w:-]*)\s*=\s*["\']([^"\']+)["\']', meta, flags=re.I))
+        for key in ("name","property","itemprop"):
+            val = (attrs.get(key) or "").lower()
+            if "keyword" in val:  # matches keywords, news_keywords, itemprop=keywords
+                content = attrs.get("content") or ""
+                kws.extend(_kw_parse_list(content))
+                break
+    return kws[:20]
+
+def _kw_from_jsonld(html: str) -> list[str]:
+    import json
+    out = []
+    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I|re.S):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    if "keyword" in str(k).lower():
+                        if isinstance(v, str):
+                            out.extend(_kw_parse_list(v))
+                        elif isinstance(v, list):
+                            for e in v:
+                                if isinstance(e, str):
+                                    out.append(e.strip().lower())
+                                elif isinstance(e, dict) and "name" in e:
+                                    out.append(str(e["name"]).strip().lower())
+    # clean + cap
+    return _kw_parse_list(", ".join(out))[:20]
+
+def _kw_from_title_headers(html: str) -> list[str]:
+    parts = []
+    t = re.search(r"<title[^>]*>(.*?)</title>", html or "", flags=re.I|re.S)
+    if t:
+        parts.append(re.sub(r"\s+", " ", t.group(1)).strip())
+    for h in ("h1","h2","h3"):
+        parts += [re.sub(r"\s+", " ", m).strip()
+                  for m in re.findall(rf"<{h}[^>]*>(.*?)</{h}>", html or "", flags=re.I|re.S)]
+    text = " ".join(p for p in parts if p)
+    words = [w.lower() for w in re.split(r"\W+", text) if len(w) > 2 and w.lower() not in _STOPWORDS]
+    return list(dict.fromkeys(words))[:10]
+
+def _kw_from_text(text: str) -> list[str]:
+    words = [w.lower() for w in re.split(r"\W+", text or "") if len(w) > 3 and w.lower() not in _STOPWORDS]
+    if not words:
+        return []
+    freq = Counter(words)
+    return [w for w, c in freq.most_common(12) if c >= 2][:12]
+
+def _kw_from_url(url: str) -> list[str]:
+    try:
+        p = urlparse(url or "")
+        parts = [seg for seg in (p.path or "").split("/") if seg]
+        out = []
+        for seg in parts:
+            seg = re.sub(r"[^\w\s\-]", " ", seg)
+            seg = re.sub(r"[-_]+", " ", seg).strip().lower()
+            out += [w for w in seg.split() if len(w) > 3 and w not in _STOPWORDS]
+        return list(dict.fromkeys(out))[:5]
+    except Exception:
+        return []
+
+def _extract_keywords(html: str, url: str, text_content: str, trafi: Dict[str, Any]) -> tuple[list[str], Dict[str, Any]]:
+    # Primary: meta/JSON-LD
+    meta_kws = _kw_from_meta(html)
+    if meta_kws:
+        return meta_kws, {"method": "primary", "source": "meta", "count": len(meta_kws)}
+    jsonld_kws = _kw_from_jsonld(html)
+    if jsonld_kws:
+        return jsonld_kws, {"method": "primary", "source": "jsonld", "count": len(jsonld_kws)}
+    # Fallbacks: trafilatura tags/categories
+    trafi_kws = []
+    for k in ("tags","categories"):
+        v = trafi.get(k)
+        if isinstance(v, list):
+            trafi_kws += [str(x).strip().lower() for x in v if str(x).strip()]
+    trafi_kws = list(dict.fromkeys(trafi_kws))[:20]
+    if trafi_kws:
+        return trafi_kws, {"method": "fallback", "source": "trafilatura", "count": len(trafi_kws)}
+    # Title/headers
+    th = _kw_from_title_headers(html)
+    if th:
+        return th, {"method": "fallback", "source": "title_headers", "count": len(th)}
+    # Content frequency
+    tf = _kw_from_text(text_content)
+    if tf:
+        return tf, {"method": "fallback", "source": "content_freq", "count": len(tf)}
+    # URL path
+    uk = _kw_from_url(url)
+    if uk:
+        return uk, {"method": "fallback", "source": "url_path", "count": len(uk)}
+    return [], {"method": "none", "source": "none", "count": 0}
+# --- end keywords helpers ---
 
 
 @app.post("/extract", response_model=ExtractResponse, responses={204: {"description": "No content extracted"}})
@@ -237,6 +371,11 @@ async def extract_endpoint(payload: ExtractRequest):
     timestamp_ms = int(time.time() * 1000)
     document_id = _doc_id_for(payload.company_id, str(payload.url))
 
+    # NEW: keywords
+    keywords, kw_meta = _extract_keywords(html, str(payload.url), text_content, data)
+    if keywords:
+        extraction_metadata["keywords"] = kw_meta
+
     response_doc = {
         "document_id": document_id,
         "url": str(payload.url),
@@ -244,6 +383,7 @@ async def extract_endpoint(payload: ExtractRequest):
         "title": title or None,
         "content": text_content,
         "seo_description": seo_desc or None,
+        "keywords": keywords or None,
         "metadata": payload.metadata or {},
         "extraction_metadata": extraction_metadata,
         "timestamp": timestamp_ms,

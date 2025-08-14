@@ -1,6 +1,18 @@
 # StormCrawler Example
 
 This is a complete web crawler application built with StormCrawler and Elasticsearch integration.
+GitHub Copilot
+
+# Important:
+Seeds are the starting URLs of a crawl.
+- Concept: The initial set of URLs the crawler is given to begin exploration. All depth calculations are measured from these URLs.
+- Depth: Seeds are depth 0 (unless explicitly stored/emitted with another depth). Any outlink from a seed becomes depth 1, and so on.
+- In this project: The spout is SimpleOracleSpout, so seeds are rows in the Oracle table (crawl_queue) with status NEW or DISCOVERED and due nextfetchdate. Those rows are emitted into the topology as the initial frontier.
+- How to add: Insert rows into crawl_queue (see README’s SQL example). If you store a depth column and the spout reads it, set it to 0. If not stored, the emitted metadata.depth typically defaults to 0.
+- Relation to emitOutlinks and max depth:
+  - parser.emitOutlinks controls whether HTML links from fetched pages are emitted (creating depth 1 from seed pages, depth 2 from those, etc.).
+  - spout.max.depth discards any URL whose depth exceeds the configured limit before it’s enqueued/fetched.
+- Sitemaps: With sitemap.discovery enabled, the crawler can discover sitemap URLs starting from your seeds (e.g., via robots.txt) and parse them. URLs found in sitemaps are then subject to the same depth and filter rules as any other discovered URL.
 
 ## Project Structure
 
@@ -168,5 +180,37 @@ Legend:
 - SQLStatusUpdaterBolt consumes status side-streams and upserts into Oracle (nextfetchdate backoff).
 
 Notes:
-- parser.emitOutlinks=false, so no outlink expansion is emitted.
+- parser.emitOutlinks=false with spout.max.depth=0; no outlink expansion beyond seeds.
 - URLPartitionerBolt is present in crawler.flux (optional), not in base-topology.flux.
+
+## Crawler behavior summary
+
+- URL filtering:
+  - Active link pattern excludes javascript:, mailto:, tel:, and fragment-only links (see jsoupfilters.json).
+  - No urlfilters.json provided in repo; allow/deny rules beyond length/path repetition are unknown. Sitemaps are still processed.
+  - default-regex-normalizers.xml rules are commented out, so no URL normalization (e.g., session IDs, fragments) is applied.
+
+- Content processing (JSoupParserBolt):
+  - Extracts: canonical, parse.title, parse.description, parse.keywords, parse.author, parse.publishedDate, parse.lastModified.
+  - Emits main text as “text” (mapped by indexer.text.fieldname).
+
+- Crawl depth:
+  - Page link expansion is disabled (parser.emitOutlinks=false).
+  - Depth is limited to 0 via spout.max.depth=0.
+
+- Outlink emission:
+  - Disabled for page parsing (no outlinks emitted from HTML pages).
+  - Sitemap discoveries still flow on the “status” stream.
+
+- Ambiguities / TODO:
+  - Provide urlfilters.json if you need host/path allow/deny rules.
+  - Enable regex normalizers if you want to strip fragments/session IDs.
+  - parsefilters.json is present but JSoupParserBolt uses jsoupfilters.json; keep both consistent if you ever switch parsers.
+
+## Crawl depth policy (TL;DR)
+
+- Current depth: 0
+  - Enforced by parser.emitOutlinks=false and spout.max.depth=0 (see crawler-conf.yaml).
+  - HTML pages do not emit outlinks.
+  - Sitemap URLs discovered by SiteMapParserBolt are still accepted and treated like seeds.
+- To enable deeper crawls: set parser.emitOutlinks=true and raise spout.max.depth accordingly.

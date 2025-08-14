@@ -46,6 +46,11 @@ http.content.limit: 65536
 metadata.persist:
   - fetch.statusCode
   - depth
+metadata.track.depth: true
+# Force depth 0 (seeds only)
+spout.max.depth: 0
+parser.emitOutlinks: false
+# parser.emitOutlinks.max.per.page: 200  # ignored when emitOutlinks=false
 
 # HTTP agent metadata
 http.agent.name:        "oracle-crawler"
@@ -54,10 +59,15 @@ http.agent.description: "StormCrawler with Oracle backend"
 http.agent.url:         "https://example.com"
 http.agent.email:       "admin@example.com"
 
-# URL / parse filters
-urlfilters.config.file:   "urlfilters.json"
+# URL / parse filters with normalization
+urlfilters.config.file: "urlfilters.json"
 parsefilters.config.file: "parsefilters.json"
 jsoupfilters.config.file: "jsoupfilters.json"
+url.normalizers.file: "default-regex-normalizers.xml"
+
+# Enable URL normalization
+url.normalizers.scope: "fetcher"
+url.normalizers.normalize.sort.querystring: true
 
 # Kryo registrations
 topology.kryo.register:
@@ -70,7 +80,6 @@ fetcher.server.min.delay: 0.0
 fetcher.max.crawl.delay: 30
 http.store.responsetime: true
 http.skip.robots: false
-parser.emitOutlinks: false
 
 # FileSpout configuration  
 spout.absolutepath: false
@@ -92,5 +101,7 @@ urlfilters:
 
 # External extractor (FastAPI/trafilatura)
 extractor.service.url: "http://extractor:8000/extract"
+extractor.timeout.ms: 15000
+extractor.min.extracted.chars: 50
 extractor.timeout.ms: 15000
 extractor.min.extracted.chars: 50

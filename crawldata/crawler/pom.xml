@@ -23,7 +23,7 @@
   </properties>
 
   <dependencies>
-    <!-- StormCrawler Core -->
+    <!-- StormCrawler Core (includes URL filtering capabilities) -->
     <dependency>
       <groupId>com.digitalpebble.stormcrawler</groupId>
       <artifactId>storm-crawler-core</artifactId>

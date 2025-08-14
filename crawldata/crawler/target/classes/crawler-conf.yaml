@@ -10,7 +10,8 @@ config:
 
   # General StormCrawler settings - DISABLE emitting outlinks
   parser.emitOutlinks: false
-  # parser.emitOutlinks.max.per.page: 200  # ignored when emitOutlinks=false
+  # Keep crawl at depth 0 (no link expansion)
+  spout.max.depth: 0
   urlfilter.refreshConfigurationInBolt: true
   
   # User agent configuration
@@ -114,4 +115,5 @@ config:
 
   # JS renderer + extractor chain (preferred)
   renderer.service.url: "http://js-renderer:8001/render_and_extract"
+  renderer.timeout.ms: 30000
   renderer.timeout.ms: 30000

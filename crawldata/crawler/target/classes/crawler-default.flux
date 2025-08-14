@@ -109,70 +109,70 @@ bolts:
     parallelism: 1
 
 streams:
-  # From spout to URL partitioner
+  # Spout -> partitioner (+ debug)
   - from: "spout"
     to: "partitioner"
     grouping:
       type: SHUFFLE
-
-  # Debug stream to monitor spout output
   - from: "spout"
-    to: "debug" 
+    to: "debug"
     grouping:
       type: SHUFFLE
 
-  # From partitioner to fetcher (field grouping for load balancing)
+  # Partitioner -> fetcher
   - from: "partitioner"
     to: "fetcher"
     grouping:
       type: FIELDS
       args: ["key"]
 
-  # From fetcher to sitemap parser
+  # Fetcher -> sitemap and extractor
   - from: "fetcher"
     to: "sitemap"
     grouping:
       type: LOCAL_OR_SHUFFLE
-
-  # From sitemap to content parser
-  - from: "sitemap"
-    to: "parse"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-
-  # From fetcher to extractor (replace direct fetcher->parse)
   - from: "fetcher"
     to: "extractor"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # From extractor to content parser
+  # Extractor -> parse; Sitemap -> parse
   - from: "extractor"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
+  - from: "sitemap"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
 
-  # From parser to indexer
+  # Parse -> index
   - from: "parse"
     to: "index"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Status updates from all processing bolts
+  # Status side-streams
   - from: "fetcher"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
-
   - from: "sitemap"
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
-
   - from: "parse"
     to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
+  - from: "index"
+    to: "status"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"

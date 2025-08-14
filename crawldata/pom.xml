@@ -26,7 +26,7 @@
       <artifactId>storm-crawler-core</artifactId>
       <version>${stormcrawler.version}</version>
     </dependency>
-    
+
     <!-- Elasticsearch Indexer Bolt -->
     <dependency>
       <groupId>com.digitalpebble.stormcrawler</groupId>
@@ -69,7 +69,7 @@
       <artifactId>storm-crawler-tika</artifactId>
       <version>${stormcrawler.version}</version>
     </dependency>
-    
+
     <!-- If Oracle JDBC is needed -->
     <dependency>
         <groupId>com.oracle.database.jdbc</groupId>

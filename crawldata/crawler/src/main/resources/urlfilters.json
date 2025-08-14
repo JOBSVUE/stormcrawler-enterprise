@@ -1,5 +1,5 @@
 {
-  "filters": [
+  "com.digitalpebble.stormcrawler.filtering.URLFilters": [
     {
       "class": "com.digitalpebble.stormcrawler.filtering.basic.BasicURLFilter",
       "name": "BasicURLFilter",
@@ -9,8 +9,26 @@
       }
     },
     {
+      "class": "com.digitalpebble.stormcrawler.filtering.depth.MaxDepthFilter",
+      "name": "MaxDepthFilter",
+      "params": {
+        "maxDepth": 0
+      }
+    },
+    {
       "class": "com.digitalpebble.stormcrawler.filtering.host.HostURLFilter",
-      "name": "HostURLFilter"
+      "name": "HostURLFilter",
+      "params": {
+        "ignoreOutsideHost": false,
+        "ignoreOutsideDomain": false
+      }
+    },
+    {
+      "class": "com.digitalpebble.stormcrawler.filtering.regex.RegexURLFilter",
+      "name": "RegexURLFilter",
+      "params": {
+        "file": "default-regex-filters.txt"
+      }
     }
   ]
 }

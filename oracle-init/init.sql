@@ -22,32 +22,32 @@ CREATE TABLE crawl_queue (
 CREATE INDEX idx_crawl_queue_status ON crawl_queue(status);
 CREATE INDEX idx_crawl_queue_host ON crawl_queue(host);
 CREATE INDEX idx_crawl_queue_nextfetch ON crawl_queue(nextfetchdate);
+CREATE INDEX idx_crawl_queue_depth ON crawl_queue(depth);
 
 -- 4) Seed the table with test URLs using NEW status
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('http://books.toscrape.com/', 'NEW', SYSTIMESTAMP, 'books.toscrape.com');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://yjc.ir/en', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/religion', 'NEW', SYSTIMESTAMP, 'yjc.ir');
-INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://ai-ark.com/', 'NEW', SYSTIMESTAMP, 'ai-ark.com');
---INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/50967/international-quran-competition-wraps-up-in-tehran', 'NEW', SYSTIMESTAMP, 'yjc.ir');
---INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/51053/iran-calls-for-muslim-unity-against-west%E2%80%99s-islamophobia-campaign', 'NEW', SYSTIMESTAMP, 'yjc.ir');
-
--- Newly added URLs
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/54036/pompeo-being-tougher-on-iran-is-biden%E2%80%99s-key-to-saudi-arabia-israel-normalization', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/54014/texas-constable-deputy-fatally-shot', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/56157/deep-pocket-who-were-on-epsteins-pocket-list', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55906/no-united-states-equals-peace', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55383/he-is-bad-news', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55351/sanders-us-is-not-able-to-afford-its-basic-medical-needs', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55350/the-rise-of-islamophobia', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55275/the-united-states-captures-saddam-hussein-former-leader-of-iraq', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55260/zionists-in-charge', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55198/the-truth-behind-mbs-relation-with-the-us', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/55172/firearms-in-the-us-statistics-and-facts', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://news.cgtn.com/news/2025-08-08/Modi-pledges-support-for-farmers-amid-Trump-s-tariff-threat--1FFCeheM8KY/p.html', 'NEW', SYSTIMESTAMP, 'cgtn.com');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/54690/malcolm-x%E2%80%99s-daughter-malikah-shabazz-found-dead-in-nyc-home', 'NEW', SYSTIMESTAMP, 'yjc.ir');
--- INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://www.yjc.ir/en/news/51305/stop-lying-muslim-advocacy-group-sues-facebook-over-claims-it-removes-hate-speech-hate-speech', 'NEW', SYSTIMESTAMP, 'yjc.ir');
-INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://test-fetched.com', 'FETCHED', SYSTIMESTAMP, 'test-fetched.com');
-INSERT INTO crawl_queue (url, status, nextfetchdate, host) VALUES ('https://test-error.com', 'ERROR', SYSTIMESTAMP, 'test-error.com');
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('http://books.toscrape.com/', 'NEW', SYSTIMESTAMP, 'books.toscrape.com', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://yjc.ir/en', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/religion', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://ai-ark.com/', 'NEW', SYSTIMESTAMP, 'ai-ark.com', 0);
+INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('http://apollo.io/', 'NEW', SYSTIMESTAMP, 'apollo.io', 0);
+--INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/50967/international-quran-competition-wraps-up-in-tehran', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+--INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/51053/iran-calls-for-muslim-unity-against-west%E2%80%99s-islamophobia-campaign', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/54036/pompeo-being-tougher-on-iran-is-biden%E2%80%99s-key-to-saudi-arabia-israel-normalization', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/54014/texas-constable-deputy-fatally-shot', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/56157/deep-pocket-who-were-on-epsteins-pocket-list', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55906/no-united-states-equals-peace', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55383/he-is-bad-news', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55351/sanders-us-is-not-able-to-afford-its-basic-medical-needs', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55350/the-rise-of-islamophobia', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55275/the-united-states-captures-saddam-hussein-former-leader-of-iraq', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55260/zionists-in-charge', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55198/the-truth-behind-mbs-relation-with-the-us', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/55172/firearms-in-the-us-statistics-and-facts', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://news.cgtn.com/news/2025-08-08/Modi-pledges-support-for-farmers-amid-Trump-s-tariff-threat--1FFCeheM8KY/p.html', 'NEW', SYSTIMESTAMP, 'cgtn.com', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/54690/malcolm-x%E2%80%99s-daughter-malikah-shabazz-found-dead-in-nyc-home', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+-- INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://www.yjc.ir/en/news/51305/stop-lying-muslim-advocacy-group-sues-facebook-over-claims-it-removes-hate-speech-hate-speech', 'NEW', SYSTIMESTAMP, 'yjc.ir', 0);
+INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://test-fetched.com', 'FETCHED', SYSTIMESTAMP, 'test-fetched.com', 0);
+INSERT INTO crawl_queue (url, status, nextfetchdate, host, depth) VALUES ('https://test-error.com', 'ERROR', SYSTIMESTAMP, 'test-error.com', 0);
 
 COMMIT;
 

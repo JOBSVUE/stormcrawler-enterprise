@@ -162,6 +162,14 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                         // also copy to parse.description to reuse existing ES mapping -> description
                         metadata.addValue("parse.description", seoDesc);
                     }
+                    // NEW: keywords array -> parse.keywords
+                    JsonNode kws = root.get("keywords");
+                    if (kws != null && kws.isArray()) {
+                        for (JsonNode kn : kws) {
+                            String kw = kn != null ? kn.asText(null) : null;
+                            if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
+                        }
+                    }
                     if (content != null && content.length() >= minChars) {
                         byte[] extractedBytes = content.getBytes(detectCharset(metadata));
                         if (title != null && !title.isBlank()) {
@@ -218,6 +226,14 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                 if (seoDesc != null && !seoDesc.isBlank()) {
                     metadata.addValue("seo_description", seoDesc);
                     metadata.addValue("parse.description", seoDesc);
+                }
+                // NEW: keywords array -> parse.keywords
+                JsonNode kws = root.get("keywords");
+                if (kws != null && kws.isArray()) {
+                    for (JsonNode kn : kws) {
+                        String kw = kn != null ? kn.asText(null) : null;
+                        if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
+                    }
                 }
                 if (content != null && content.length() >= minChars) {
                     byte[] extractedBytes = content.getBytes(detectCharset(metadata));
