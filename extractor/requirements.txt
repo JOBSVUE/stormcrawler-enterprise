@@ -2,3 +2,13 @@ fastapi==0.110.0
 uvicorn[standard]==0.27.1
 trafilatura==1.6.3
 pydantic==2.6.1
+
+# Mandatory summarizers / model runtime
+sumy
+transformers
+sentencepiece
+torch
+
+# Optional but recommended for robust meta parsing
+beautifulsoup4
+lxml

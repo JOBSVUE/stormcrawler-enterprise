@@ -2,26 +2,33 @@ import re
 from typing import Optional, Tuple
 from html import unescape
 
-_SUMY_AVAILABLE = False
-_TRANSFORMERS_AVAILABLE = False
+# ---- Mandatory summarization dependencies ----
+# These imports are now strict: if they are missing, import will fail and the service
+# will not start. This enforces that transformers and sumy are available.
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer
+
+from transformers import pipeline
+
+_SUMY_AVAILABLE = True
+_TRANSFORMERS_AVAILABLE = True
 _summarizer = None
 _hf_summarizer = None
 
-# Try Sumy
+# Optional HTML parser (BeautifulSoup) — falls back to regex when not available.
+_BS4_AVAILABLE = False
+_LXML_AVAILABLE = False
 try:
-    from sumy.parsers.plaintext import PlaintextParser  # type: ignore
-    from sumy.nlp.tokenizers import Tokenizer  # type: ignore
-    from sumy.summarizers.lsa import LsaSummarizer  # type: ignore
-    _SUMY_AVAILABLE = True
+    from bs4 import BeautifulSoup  # type: ignore
+    _BS4_AVAILABLE = True
+    try:
+        import lxml  # type: ignore
+        _LXML_AVAILABLE = True
+    except Exception:
+        _LXML_AVAILABLE = False
 except Exception:
-    _SUMY_AVAILABLE = False
-
-# Try Transformers summarizer (bart-large-cnn)
-try:
-    from transformers import pipeline  # type: ignore
-    _TRANSFORMERS_AVAILABLE = True
-except Exception:
-    _TRANSFORMERS_AVAILABLE = False
+    _BS4_AVAILABLE = False
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -41,16 +48,13 @@ def _clamp(text: str, max_chars: int) -> str:
     return text[:cut].rstrip() + "…"
 
 
-def extract_meta_description(html: str, max_chars: int = 160) -> Optional[str]:
+def _extract_meta_description_regex(html: str, max_chars: int = 160) -> Optional[str]:
     """
-    Extract description from meta tags: name=description, property=og:description, name=twitter:description.
-    Regex-based to avoid extra deps; decodes entities; returns clamped string.
+    Regex-based meta extraction fallback (keeps original behaviour).
     """
     if not html:
         return None
-    # Find all meta tags
     for meta in re.findall(r"<meta\b[^>]*>", html, flags=re.I):
-        # Pull attributes
         attrs = dict(re.findall(r'(\w[\w:-]*)\s*=\s*["\']([^"\']+)["\']', meta, flags=re.I))
         name = (attrs.get("name") or attrs.get("property") or "").lower()
         if name in ("description", "og:description", "twitter:description"):
@@ -59,6 +63,44 @@ def extract_meta_description(html: str, max_chars: int = 160) -> Optional[str]:
             if content:
                 return _clamp(content, max_chars)
     return None
+
+
+def extract_meta_description(html: str, max_chars: int = 160) -> Optional[str]:
+    """
+    Extract description from meta tags in a more robust way using BeautifulSoup when available.
+
+    - If BeautifulSoup is available, parse the HTML and look through all <meta> tags for
+      name/property/itemprop values of description / og:description / twitter:description (case-insensitive).
+    - If BeautifulSoup isn't available, fall back to the original regex-based implementation.
+
+    Returned string is unescaped, whitespace-normalized and clamped to `max_chars`.
+    """
+    if not html:
+        return None
+
+    if _BS4_AVAILABLE:
+        parser = "lxml" if _LXML_AVAILABLE else "html.parser"
+        try:
+            soup = BeautifulSoup(html, parser)
+        except Exception:
+            return _extract_meta_description_regex(html, max_chars=max_chars)
+
+        for tag in soup.find_all("meta"):
+            try:
+                attrs = {k.lower(): v for k, v in (tag.attrs or {}).items()}
+            except Exception:
+                attrs = {}
+            for key in ("name", "property", "itemprop"):
+                val = (attrs.get(key) or "").lower()
+                if val in ("description", "og:description", "twitter:description", "description:en"):
+                    content = attrs.get("content") or attrs.get("value") or ""
+                    content = _normalize_whitespace(unescape(content))
+                    if content:
+                        return _clamp(content, max_chars)
+        return None
+
+    # Fallback to regex
+    return _extract_meta_description_regex(html, max_chars=max_chars)
 
 
 def _ensure_sumy():
@@ -71,7 +113,8 @@ def _ensure_sumy():
 def _ensure_hf():
     global _hf_summarizer
     if _hf_summarizer is None and _TRANSFORMERS_AVAILABLE:
-        # Lazy load; callers should expect first call to be slow if model is not cached
+        # Lazy-load HF pipeline. If you want to fail at import/startup instead of
+        # on first use, instantiate this pipeline at startup (see README / notes).
         _hf_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     return _hf_summarizer
 
@@ -82,7 +125,6 @@ def _summarize_sumy(text: str, max_chars: int) -> Optional[str]:
         if not summarizer:
             return None
         parser = PlaintextParser.from_string(text, Tokenizer("english"))
-        # Take small number of sentences and clamp
         sentences = list(summarizer(parser.document, 3))
         joined = _normalize_whitespace(" ".join(str(s) for s in sentences))
         return _clamp(joined or text, max_chars)
@@ -95,7 +137,6 @@ def _summarize_hf(text: str, max_chars: int) -> Optional[str]:
         summarizer = _ensure_hf()
         if not summarizer:
             return None
-        # Approximate target length (tokens != chars; keep it small)
         result = summarizer(text[:4000], max_length=80, min_length=25, do_sample=False)
         summary = _normalize_whitespace(result[0]["summary_text"])
         return _clamp(summary or text, max_chars)
@@ -104,7 +145,6 @@ def _summarize_hf(text: str, max_chars: int) -> Optional[str]:
 
 
 def _simple_sentences(text: str) -> list:
-    # Very naive sentence split
     parts = re.split(r"(?<=[.!?])\s+", _normalize_whitespace(text))
     return [p for p in parts if p]
 

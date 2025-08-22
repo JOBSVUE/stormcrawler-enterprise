@@ -45,20 +45,19 @@
       }
     },
     {
-      "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
-      "name": "LinkParseFilter",
+      "class": "com.digitalpebble.stormcrawler.parse.filter.ContentFilter",
+      "name": "ContentFilter",
       "params": {
-        "pattern": "//a[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"
-      }
-    }
-  ]
-}
-      "params": {
-        "pattern": "//a[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"
-      }
-    }
-  ]
-}
+        "pattern": [
+          "ARTICLE",
+          "MAIN", 
+          "SECTION",
+          "DIV[class*='content']",
+          "DIV[class*='post']",
+          "DIV[class*='article']"
+        ],
+        "exclude": [
+          "HEADER",
           "FOOTER",
           "NAV",
           "FORM"
@@ -66,7 +65,7 @@
       }
     },
     {
-      "class": "com.digitalpebble.stormcrawler.jsoup.LinkParseFilter",
+      "class": "com.digitalpebble.stormcrawler.parse.filter.LinkParseFilter",
       "name": "LinkParseFilter",
       "params": {
         "pattern": "//a[@href and not(starts-with(@href,'javascript:')) and not(starts-with(@href,'mailto:')) and not(starts-with(@href,'tel:')) and not(starts-with(@href,'#'))]"

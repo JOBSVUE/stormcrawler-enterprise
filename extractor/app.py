@@ -32,13 +32,11 @@ from urllib.parse import urlparse, urlunparse
 import os
 import re
 from collections import Counter
-from urllib.parse import urlparse
+from html import unescape
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
-
-from .seo_description import extract_meta_description, generate_description
 
 # Ensure trafilatura is available
 try:
@@ -46,6 +44,18 @@ try:
     _TRAFILATURA_AVAILABLE = True
 except Exception:
     _TRAFILATURA_AVAILABLE = False
+
+# SEO helpers (these imports will raise if mandatory summarizers are missing)
+try:
+    from .seo_description import extract_meta_description, generate_description, _normalize_whitespace, _clamp
+    # also import module for calling helpers if needed
+    from . import seo_description as seo_desc_mod
+except Exception as e:
+    # Make error explicit so startup fails fast with a helpful message.
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("extract_api_rest")
+    logger.critical("Failed to import seo_description module or mandatory summarization libraries: %s", e)
+    raise
 
 # Configuration defaults
 MAX_HTML_LENGTH = 1_000_000        # characters
@@ -140,11 +150,23 @@ def _run_trafilatura_extract(html_content: str, url: str) -> Optional[Dict[str, 
 
 @app.on_event("startup")
 def startup_event():
+    # Fail fast if trafilatura isn't available.
+    missing = []
     if not _TRAFILATURA_AVAILABLE:
-        logger.error("Trafilatura is required but not available. Install trafilatura.")
-        # Do not raise here — allow container to start but endpoint will fail with 500 if used.
-    else:
-        logger.info("Trafilatura is available; extractor ready.")
+        missing.append("trafilatura")
+    # If mandatory summarizers are missing, the import above would already have failed;
+    # this is an extra check to be explicit in logs if somehow flags are not set.
+    if not getattr(seo_desc_mod, "_SUMY_AVAILABLE", False):
+        missing.append("sumy")
+    if not getattr(seo_desc_mod, "_TRANSFORMERS_AVAILABLE", False):
+        missing.append("transformers")
+
+    if missing:
+        logger.critical("Required dependencies missing: %s", ", ".join(missing))
+        logger.critical("Install them and restart the service. Example: pip install sumy transformers sentencepiece torch")
+        raise RuntimeError(f"Missing required packages: {', '.join(missing)}")
+
+    logger.info("All required dependencies present; extractor ready.")
 
 
 # --- Keywords helpers (no heavy deps) ---
@@ -332,14 +354,43 @@ async def extract_endpoint(payload: ExtractRequest):
     if not title and payload.fetch_metadata:
         title = (payload.fetch_metadata.get("title") or "").strip()
 
-    # SEO description: prefer meta tags in HTML, otherwise generate per strategy
+    # --- SEO description selection (preferred order) ---
+    # 1) trafilatura's description (preferred)
+    # 2) HTML meta description (og:, twitter:, name=description)
+    # 3) generated description (transformers/sumy/simple)
     seo_desc_source = None
-    seo_desc = extract_meta_description(html, max_chars=SEO_DESC_MAX_CHARS)
-    if seo_desc:
-        seo_desc_source = "meta"
-    else:
-        seo_desc, gen_src = generate_description(text_content, mode=SEO_DESC_MODE, max_chars=SEO_DESC_MAX_CHARS)
+    seo_desc_val = None
+
+    # 1) trafilatura-provided description
+    trafi_desc_raw = (data.get("description") or "").strip()
+    if trafi_desc_raw:
+        try:
+            # normalize/unescape and clamp using helpers from seo_description module
+            norm = _normalize_whitespace(unescape(st := trafi_desc_raw))
+            seo_desc_val = _clamp(norm, SEO_DESC_MAX_CHARS)
+            seo_desc_source = "trafilatura"
+        except Exception:
+            # Fallback simple clamp
+            cand = unescape(strafi := trafi_desc_raw)
+            if len(cand) > SEO_DESC_MAX_CHARS:
+                seo_desc_val = cand[:SEO_DESC_MAX_CHARS].rstrip() + "…"
+            else:
+                seo_desc_val = cand
+            seo_desc_source = "trafilatura"
+
+    # 2) HTML meta description
+    if not seo_desc_val:
+        md = extract_meta_description(html, max_chars=SEO_DESC_MAX_CHARS)
+        if md:
+            seo_desc_val = md
+            seo_desc_source = "meta"
+
+    # 3) generated fallback
+    if not seo_desc_val:
+        seo_desc_val, gen_src = generate_description(text_content, mode=SEO_DESC_MODE, max_chars=SEO_DESC_MAX_CHARS)
         seo_desc_source = gen_src
+
+    seo_desc = seo_desc_val or None
 
     extraction_metadata = {
         "method": "trafilatura",
