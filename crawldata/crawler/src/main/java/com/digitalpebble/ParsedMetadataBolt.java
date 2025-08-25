@@ -159,8 +159,8 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                     if (companyId != null) metadata.addValue("company_id", companyId);
                     if (seoDesc != null && !seoDesc.isBlank()) {
                         metadata.addValue("seo_description", seoDesc);
-                        // also copy to parse.description to reuse existing ES mapping -> description
-                        metadata.addValue("parse.description", seoDesc);
+                        // removed: do not also copy to parse.description (mapping handles unification)
+                        // metadata.addValue("parse.description", seoDesc);
                     }
                     // NEW: keywords array -> parse.keywords
                     JsonNode kws = root.get("keywords");
@@ -170,13 +170,21 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                             if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
                         }
                     }
+                    // NEW: languages array -> languages
+                    JsonNode langs = root.get("languages");
+                    if (langs != null && langs.isArray()) {
+                        for (JsonNode ln : langs) {
+                            String lc = ln != null ? ln.asText(null) : null;
+                            if (lc != null && !lc.isBlank()) metadata.addValue("languages", lc);
+                        }
+                    }
                     if (content != null && content.length() >= minChars) {
                         byte[] extractedBytes = content.getBytes(detectCharset(metadata));
                         if (title != null && !title.isBlank()) {
                             metadata.addValue("parse.title", title);
                         }
-                        // optional: mirror main content into a metadata field for separate indexing
-                        metadata.addValue("contents", content);
+                        // removed to avoid duplication with ES 'text' field
+                        // metadata.addValue("contents", content);
                         metadata.addValue("extraction.method", "renderer+trafilatura");
                         metadata.addValue("extraction.length", Integer.toString(content.length()));
                         metadata.addValue("extraction.status", "200");
@@ -225,7 +233,8 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                 if (companyId != null) metadata.addValue("company_id", companyId);
                 if (seoDesc != null && !seoDesc.isBlank()) {
                     metadata.addValue("seo_description", seoDesc);
-                    metadata.addValue("parse.description", seoDesc);
+                    // removed: do not also copy to parse.description (mapping handles unification)
+                    // metadata.addValue("parse.description", seoDesc);
                 }
                 // NEW: keywords array -> parse.keywords
                 JsonNode kws = root.get("keywords");
@@ -235,13 +244,21 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                         if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
                     }
                 }
+                // NEW: languages array -> languages
+                JsonNode langs = root.get("languages");
+                if (langs != null && langs.isArray()) {
+                    for (JsonNode ln : langs) {
+                        String lc = ln != null ? ln.asText(null) : null;
+                        if (lc != null && !lc.isBlank()) metadata.addValue("languages", lc);
+                    }
+                }
                 if (content != null && content.length() >= minChars) {
                     byte[] extractedBytes = content.getBytes(detectCharset(metadata));
                     if (title != null && !title.isBlank()) {
                         metadata.addValue("parse.title", title);
                     }
-                    // optional: mirror main content into a metadata field for separate indexing
-                    metadata.addValue("contents", content);
+                    // removed to avoid duplication with ES 'text' field
+                    // metadata.addValue("contents", content);
                     metadata.addValue("extraction.method", "trafilatura");
                     metadata.addValue("extraction.length", Integer.toString(content.length()));
                     metadata.addValue("extraction.status", "200");

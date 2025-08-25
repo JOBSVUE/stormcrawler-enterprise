@@ -4,11 +4,14 @@ trafilatura==1.6.3
 pydantic==2.6.1
 
 # Mandatory summarizers / model runtime
-sumy
-transformers
-sentencepiece
-torch
+sumy==0.11.0
+transformers==4.41.2
+torch==2.2.2
+sentencepiece==0.2.0
 
-# Optional but recommended for robust meta parsing
-beautifulsoup4
-lxml
+# HTML parsing (required)
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# Language detection fallback
+langdetect==1.0.9

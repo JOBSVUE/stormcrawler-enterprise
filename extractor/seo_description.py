@@ -1,34 +1,55 @@
+# seo_description.py
+"""
+SEO description & keyword helpers for the extractor service.
+
+Provides:
+ - extract_meta_description(html, max_chars=160) -> Optional[str]
+ - generate_description(text, mode="c", max_chars=160) -> (Optional[str], source_str)
+ - generate_keywords_with_hf(text, max_keywords=12) -> List[str]
+
+This implementation is strict: the summarization dependencies are mandatory
+and will raise ImportError at module import time if not present. BeautifulSoup
+and lxml are also mandatory.
+"""
+
 import re
-from typing import Optional, Tuple
+import os
+from typing import Optional, Tuple, List
 from html import unescape
+import logging
 
-# ---- Mandatory summarization dependencies ----
-# These imports are now strict: if they are missing, import will fail and the service
-# will not start. This enforces that transformers and sumy are available.
-from sumy.parsers.plaintext import PlaintextParser
-from sumy.nlp.tokenizers import Tokenizer
-from sumy.summarizers.lsa import LsaSummarizer
+logger = logging.getLogger("seo_description")
 
-from transformers import pipeline
+# ---- Summarization dependencies (now mandatory) ----
+try:
+    from sumy.parsers.plaintext import PlaintextParser  # type: ignore
+    from sumy.nlp.tokenizers import Tokenizer  # type: ignore
+    from sumy.summarizers.lsa import LsaSummarizer  # type: ignore
+except Exception as e:
+    raise ImportError(
+        "Sumy is required for SEO summarization. Install with: pip install sumy"
+    ) from e
 
-_SUMY_AVAILABLE = True
-_TRANSFORMERS_AVAILABLE = True
-_summarizer = None
-_hf_summarizer = None
+try:
+    from transformers import pipeline  # type: ignore
+except Exception as e:
+    raise ImportError(
+        "transformers is required for HF-based summarization and keyword extraction. "
+        "Install with: pip install transformers"
+    ) from e
 
-# Optional HTML parser (BeautifulSoup) — falls back to regex when not available.
-_BS4_AVAILABLE = False
-_LXML_AVAILABLE = False
+# ---- Mandatory HTML parsing (BeautifulSoup + lxml) ----
 try:
     from bs4 import BeautifulSoup  # type: ignore
-    _BS4_AVAILABLE = True
-    try:
-        import lxml  # type: ignore
-        _LXML_AVAILABLE = True
-    except Exception:
-        _LXML_AVAILABLE = False
-except Exception:
-    _BS4_AVAILABLE = False
+except Exception as e:
+    raise ImportError(
+        "BeautifulSoup4 is required. Install with: pip install beautifulsoup4 lxml"
+    ) from e
+
+try:
+    import lxml  # type: ignore
+except Exception as e:
+    raise ImportError("lxml is required. Install with: pip install lxml") from e
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -36,6 +57,10 @@ def _normalize_whitespace(text: str) -> str:
 
 
 def _clamp(text: str, max_chars: int) -> str:
+    """
+    Normalize whitespace and clamp to max_chars, preferring to cut at sentence boundary or space.
+    Adds an ellipsis char if clipped.
+    """
     text = _normalize_whitespace(text)
     if len(text) <= max_chars:
         return text
@@ -48,74 +73,87 @@ def _clamp(text: str, max_chars: int) -> str:
     return text[:cut].rstrip() + "…"
 
 
-def _extract_meta_description_regex(html: str, max_chars: int = 160) -> Optional[str]:
+def extract_meta_description(html: str, max_chars: int = 160) -> Optional[str]:
     """
-    Regex-based meta extraction fallback (keeps original behaviour).
+    Meta description extraction using BeautifulSoup + lxml.
+    Returns normalized description string (UNCLAMPED) or None.
+
+    Notes:
+      - This function normalizes and unescapes content but DOES NOT clamp to max_chars.
+      - The calling code controls clamping behavior.
     """
     if not html:
         return None
-    for meta in re.findall(r"<meta\b[^>]*>", html, flags=re.I):
-        attrs = dict(re.findall(r'(\w[\w:-]*)\s*=\s*["\']([^"\']+)["\']', meta, flags=re.I))
-        name = (attrs.get("name") or attrs.get("property") or "").lower()
-        if name in ("description", "og:description", "twitter:description"):
-            content = attrs.get("content") or ""
+
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except Exception:
+        return None
+
+    candidates = [
+        {"name": "description"},
+        {"property": "og:description"},
+        {"name": "twitter:description"},
+        {"itemprop": "description"},
+    ]
+    for attrs in candidates:
+        tag = soup.find("meta", attrs=attrs)
+        if tag:
+            content = tag.get("content") or tag.get("value") or ""
             content = _normalize_whitespace(unescape(content))
             if content:
-                return _clamp(content, max_chars)
+                # DO NOT clamp here — return normalized raw
+                return content
+
+    # Try JSON-LD description field if present (schema.org)
+    try:
+        import json  # local import
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = script.get_text() or ""
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict):
+                    desc = item.get("description") or item.get("desc")
+                    if isinstance(desc, str) and desc.strip():
+                        return _normalize_whitespace(unescape(desc))
+    except Exception:
+        # swallow JSON-LD parsing issues
+        pass
+
     return None
 
 
-def extract_meta_description(html: str, max_chars: int = 160) -> Optional[str]:
-    """
-    Extract description from meta tags in a more robust way using BeautifulSoup when available.
-
-    - If BeautifulSoup is available, parse the HTML and look through all <meta> tags for
-      name/property/itemprop values of description / og:description / twitter:description (case-insensitive).
-    - If BeautifulSoup isn't available, fall back to the original regex-based implementation.
-
-    Returned string is unescaped, whitespace-normalized and clamped to `max_chars`.
-    """
-    if not html:
-        return None
-
-    if _BS4_AVAILABLE:
-        parser = "lxml" if _LXML_AVAILABLE else "html.parser"
-        try:
-            soup = BeautifulSoup(html, parser)
-        except Exception:
-            return _extract_meta_description_regex(html, max_chars=max_chars)
-
-        for tag in soup.find_all("meta"):
-            try:
-                attrs = {k.lower(): v for k, v in (tag.attrs or {}).items()}
-            except Exception:
-                attrs = {}
-            for key in ("name", "property", "itemprop"):
-                val = (attrs.get(key) or "").lower()
-                if val in ("description", "og:description", "twitter:description", "description:en"):
-                    content = attrs.get("content") or attrs.get("value") or ""
-                    content = _normalize_whitespace(unescape(content))
-                    if content:
-                        return _clamp(content, max_chars)
-        return None
-
-    # Fallback to regex
-    return _extract_meta_description_regex(html, max_chars=max_chars)
+# ---------------- Summarization helpers (Sumy & Transformers) ----------------
+_summarizer = None
+_hf_summarizer = None
 
 
 def _ensure_sumy():
     global _summarizer
-    if _summarizer is None and _SUMY_AVAILABLE:
-        _summarizer = LsaSummarizer()
+    if _summarizer is None:
+        try:
+            _summarizer = LsaSummarizer()  # type: ignore[name-defined]
+        except Exception:
+            logger.exception("Failed to instantiate Sumy summarizer")
+            _summarizer = None
+            raise
     return _summarizer
 
 
 def _ensure_hf():
     global _hf_summarizer
-    if _hf_summarizer is None and _TRANSFORMERS_AVAILABLE:
-        # Lazy-load HF pipeline. If you want to fail at import/startup instead of
-        # on first use, instantiate this pipeline at startup (see README / notes).
-        _hf_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    if _hf_summarizer is None:
+        model_name = os.getenv("SEO_SUMMARY_MODEL", "facebook/bart-large-cnn")
+        try:
+            _hf_summarizer = pipeline("summarization", model=model_name)  # type: ignore[name-defined]
+        except Exception:
+            logger.exception("Failed to create HF summarization pipeline for model %s", model_name)
+            _hf_summarizer = None
+            raise
     return _hf_summarizer
 
 
@@ -124,11 +162,13 @@ def _summarize_sumy(text: str, max_chars: int) -> Optional[str]:
         summarizer = _ensure_sumy()
         if not summarizer:
             return None
-        parser = PlaintextParser.from_string(text, Tokenizer("english"))
+        parser = PlaintextParser.from_string(text, Tokenizer("english"))  # type: ignore[name-defined]
+        # choose a small number of sentences; LSA returns sentence objects
         sentences = list(summarizer(parser.document, 3))
         joined = _normalize_whitespace(" ".join(str(s) for s in sentences))
         return _clamp(joined or text, max_chars)
     except Exception:
+        logger.exception("Sumy summarization failed")
         return None
 
 
@@ -137,65 +177,116 @@ def _summarize_hf(text: str, max_chars: int) -> Optional[str]:
         summarizer = _ensure_hf()
         if not summarizer:
             return None
+        # Truncate input to 4000 chars per spec
         result = summarizer(text[:4000], max_length=80, min_length=25, do_sample=False)
-        summary = _normalize_whitespace(result[0]["summary_text"])
+        if not result:
+            return None
+        summary = _normalize_whitespace(result[0].get("summary_text") or result[0].get("text") or "")
         return _clamp(summary or text, max_chars)
     except Exception:
+        logger.exception("HF summarization failed")
         return None
-
-
-def _simple_sentences(text: str) -> list:
-    parts = re.split(r"(?<=[.!?])\s+", _normalize_whitespace(text))
-    return [p for p in parts if p]
-
-
-def _summarize_simple(text: str, max_chars: int) -> str:
-    sentences = _simple_sentences(text)
-    if not sentences:
-        return _clamp(text, max_chars)
-    out = []
-    total = 0
-    for s in sentences:
-        s = _normalize_whitespace(s)
-        if not s:
-            continue
-        if total + len(s) + (1 if total else 0) > max_chars:
-            break
-        out.append(s)
-        total += len(s) + (1 if total else 0)
-        if total >= max_chars:
-            break
-    if not out:
-        return _clamp(sentences[0], max_chars)
-    return _clamp(" ".join(out), max_chars)
 
 
 def generate_description(text: str, mode: str = "c", max_chars: int = 160) -> Tuple[Optional[str], str]:
     """
     Generate a description within max_chars.
-    Returns (description, source), where source is one of:
-    'generated:transformers', 'generated:sumy', 'generated:simple'
+    Returns (description, source) where source is:
+      - 'generated:transformers'
+      - 'generated:sumy'
+      - 'generated:none' (if neither summarizer produced output)
+
+    Mode behavior:
+      - 'c' (default): try Transformers first, then Sumy.
+      - 'b': prefer Sumy only.
+      - other values -> generated:none
     """
     if not text:
-        return None, "generated:simple"
+        return None, "generated:none"
 
     mode = (mode or "c").lower()
     if mode == "c":
-        # Prefer transformers, then sumy, fallback to simple
-        if _TRANSFORMERS_AVAILABLE:
-            summary = _summarize_hf(text, max_chars)
-            if summary:
-                return summary, "generated:transformers"
-        if _SUMY_AVAILABLE:
-            summary = _summarize_sumy(text, max_chars)
-            if summary:
-                return summary, "generated:sumy"
-        return _summarize_simple(text, max_chars), "generated:simple"
+        # Prefer transformers, then sumy
+        # both transformers and sumy are mandatory at import time; attempt HF first
+        summary = _summarize_hf(text, max_chars)
+        if summary:
+            return summary, "generated:transformers"
+        summary = _summarize_sumy(text, max_chars)
+        if summary:
+            return summary, "generated:sumy"
+        return None, "generated:none"
 
     if mode == "b":
-        return _summarize_simple(text, max_chars), "generated:simple"
+        summary = _summarize_sumy(text, max_chars)
+        if summary:
+            return summary, "generated:sumy"
+        return None, "generated:none"
 
-    # mode == 'a': first sentence
-    sentences = _simple_sentences(text)
-    first = sentences[0] if sentences else text
-    return _clamp(first, max_chars), "generated:simple"
+    return None, "generated:none"
+
+
+# ---------------- LLM-based keyword generation helpers ----------------
+_KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "google/flan-t5-large")
+_keyword_pipeline = None
+
+
+def _ensure_keyword_pipeline():
+    """
+    Create a text2text-generation HF pipeline for keyword extraction.
+    This will raise if transformers/model cannot be loaded.
+    """
+    global _keyword_pipeline
+    if _keyword_pipeline is None:
+        try:
+            from transformers import pipeline as _hf_pipeline  # local import
+            _keyword_pipeline = _hf_pipeline("text2text-generation", model=_KEYWORD_MODEL)
+        except Exception:
+            logger.exception("Failed to create keyword pipeline for model %s", _KEYWORD_MODEL)
+            _keyword_pipeline = None
+            raise
+    return _keyword_pipeline
+
+
+def generate_keywords_with_hf(text: str, max_keywords: int = 12) -> List[str]:
+    """
+    Use an instruction-tuned text2text model to extract keywords/keyphrases.
+    Returns a list of normalized keywords (lowercased, stripped), up to max_keywords.
+    Will return an empty list on failure, but the pipeline creation itself will raise on import-time/model errors.
+    """
+    if not text:
+        return []
+
+    pipe = _ensure_keyword_pipeline()
+    if not pipe:
+        return []
+
+    prompt = (
+        f"Extract up to {max_keywords} concise keywords or keyphrases from the following text. "
+        "Return them as a single comma-separated list, no numbering, no extra commentary.\n\n"
+        f"Text: {text[:8000]}"
+    )
+
+    try:
+        out = pipe(prompt, max_length=128, do_sample=False)
+    except Exception:
+        logger.exception("Keyword pipeline generation failed")
+        return []
+
+    if not out:
+        return []
+
+    first = out[0]
+    raw = first.get("generated_text") or first.get("text") or str(first)
+    # Split and normalize
+    parts = [p.strip().lower() for p in re.split(r"[,\n;]+", raw) if p.strip()]
+    parts = [re.sub(r"[^\w\s\-]", "", p) for p in parts]  # remove punctuation
+    parts = [p for p in parts if 2 <= len(p) <= 100]
+    seen = set()
+    uniq = []
+    for p in parts:
+        if p and p not in seen:
+            seen.add(p)
+            uniq.append(p)
+        if len(uniq) >= max_keywords:
+            break
+    return uniq

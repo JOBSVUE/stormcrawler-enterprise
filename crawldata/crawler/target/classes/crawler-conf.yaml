@@ -106,6 +106,11 @@ config:
     - parse.publishedDate=publishedDate
     - parse.lastModified=lastModified
     - canonical=canonical
+    # unify SEO desc into one ES field
+    - seo_description=description
+    # keep other custom fields
+    - company_id=company_id
+    - languages=languages
 
   # External extractor (FastAPI/trafilatura) settings
   extractor.service.url: "http://extractor:8000/extract"
@@ -115,5 +120,6 @@ config:
 
   # JS renderer + extractor chain (preferred)
   renderer.service.url: "http://js-renderer:8001/render_and_extract"
+  renderer.timeout.ms: 30000
   renderer.timeout.ms: 30000
   renderer.timeout.ms: 30000

@@ -55,6 +55,10 @@ config:
     - parse.publishedDate=publishedDate
     - parse.lastModified=lastModified
     - canonical=canonical
+    - company_id=company_id
+    - seo_description=seo_description
+    - languages=languages
+    - contents=contents
   
   # Connection settings
   es.client.connection.timeout: 10000
@@ -182,7 +186,7 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
-      streamId: "status"
+      
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
@@ -191,5 +195,4 @@ streams:
     to: "status"
     grouping:
       type: LOCAL_OR_SHUFFLE
-      streamId: "status"
       streamId: "status"

@@ -1,25 +1,7 @@
 """
 extract_api_rest.py
 
-Simple FastAPI REST service that accepts raw HTML (JSON POST) and returns extracted JSON ready for indexing.
-No Redis/Kafka — synchronous HTTP request/response only.
-
-Usage:
-  POST /extract
-  Body (application/json):
-    {
-      "url": "https://example.com/article",
-      "html_content": "<html>...</html>",
-      "company_id": "acme",            # optional
-      "metadata": { ... },            # optional
-      "fetch_metadata": { ... }       # optional
-    }
-
-Responses:
-  200 -> JSON document ready for indexing (includes `document_id`)
-  204 -> No content extracted (too short / extraction failed)
-  400 -> Bad request
-  500 -> Internal error
+FastAPI REST service that accepts raw HTML (JSON POST) and returns extracted JSON ready for indexing.
 """
 
 import json
@@ -27,50 +9,69 @@ import logging
 import hashlib
 import time
 import concurrent.futures
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse, urlunparse
 import os
 import re
-from collections import Counter
 from html import unescape
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
 
-# Ensure trafilatura is available
+# ---- Mandatory dependencies (fail fast if missing) ----
 try:
     import trafilatura  # type: ignore
-    _TRAFILATURA_AVAILABLE = True
-except Exception:
-    _TRAFILATURA_AVAILABLE = False
+except Exception as e:
+    raise ImportError("trafilatura is required. Install with: pip install trafilatura") from e
 
-# SEO helpers (these imports will raise if mandatory summarizers are missing)
+# SEO helpers — these imports will fail if required summarizers / parsers are missing
 try:
-    from .seo_description import extract_meta_description, generate_description, _normalize_whitespace, _clamp
-    # also import module for calling helpers if needed
+    from .seo_description import (
+        extract_meta_description,
+        generate_description,
+        _normalize_whitespace,
+        _clamp,
+        generate_keywords_with_hf,
+    )
     from . import seo_description as seo_desc_mod
 except Exception as e:
-    # Make error explicit so startup fails fast with a helpful message.
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("extract_api_rest")
-    logger.critical("Failed to import seo_description module or mandatory summarization libraries: %s", e)
+    logger.critical("Failed to import seo_description or mandatory summarization libraries: %s", e)
     raise
+
+# langdetect (mandatory for language detection fallback)
+try:
+    from langdetect import detect_langs  # type: ignore
+except Exception as e:
+    raise ImportError("langdetect is required. Install with: pip install langdetect") from e
+
+# BeautifulSoup is already enforced in seo_description.py; import for HTML lang parsing
+from bs4 import BeautifulSoup  # type: ignore
 
 # Configuration defaults
 MAX_HTML_LENGTH = 1_000_000        # characters
 EXTRACTION_TIMEOUT = 15           # seconds
 MIN_EXTRACTED_CHARS = 50
-# SEO description config
-SEO_DESC_MODE = os.getenv("SEO_DESC_MODE", "c").lower()         # 'a' | 'b' | 'c'
+SEO_DESC_MODE = os.getenv("SEO_DESC_MODE", "c").lower()
 SEO_DESC_MAX_CHARS = int(os.getenv("SEO_DESC_MAX_CHARS", "160"))
+
+# Keywords/LLM config
+MIN_KEYWORDS_BEFORE_LLM = int(os.getenv("MIN_KEYWORDS_BEFORE_LLM", "3"))
+MAX_KEYWORDS_FROM_LLM = int(os.getenv("MAX_KEYWORDS_FROM_LLM", "12"))
+KEYWORD_MODEL_ENV = os.getenv("KEYWORD_MODEL", "google/flan-t5-large")
+
+# Language detection config
+LANG_DETECT_PROB_THRESHOLD = float(os.getenv("LANG_DETECT_PROB_THRESHOLD", "0.20"))
+MAX_LANGUAGES = int(os.getenv("MAX_LANGUAGES", "4"))
 
 logger = logging.getLogger("extract_api_rest")
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="HTML Extractor API", version="1.0")
 
-# Healthcheck endpoint
+# Healthcheck
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -91,14 +92,15 @@ class ExtractResponse(BaseModel):
     title: Optional[str] = None
     content: str
     seo_description: Optional[str] = None
-    keywords: Optional[list[str]] = None
+    keywords: Optional[List[str]] = None
+    languages: Optional[List[str]] = None
+    contact_us: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     extraction_metadata: Dict[str, Any]
     timestamp: int
 
 
 def _normalize_url(url: str) -> str:
-    """Normalize URL for id generation (lowercase scheme/host, strip fragment, default port removal)."""
     try:
         parsed = urlparse(url)
         scheme = parsed.scheme.lower()
@@ -114,7 +116,6 @@ def _normalize_url(url: str) -> str:
 
 
 def _doc_id_for(company_id: Optional[str], url: str) -> str:
-    """Create deterministic bounded-length id using SHA1(company_id|normalized_url)."""
     normalized = _normalize_url(url)
     key = f"{company_id or ''}|{normalized}"
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
@@ -124,12 +125,7 @@ _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
 def _run_trafilatura_extract(html_content: str, url: str) -> Optional[Dict[str, Any]]:
-    """
-    Call trafilatura.extract with JSON output and parse it.
-    Returns dict on success, None otherwise.
-    """
     try:
-        # output_format="json" returns a JSON string with metadata
         result = trafilatura.extract(
             html_content,
             url=url,
@@ -141,7 +137,6 @@ def _run_trafilatura_extract(html_content: str, url: str) -> Optional[Dict[str, 
         )
         if not result:
             return None
-        # parse JSON string to python dict
         return json.loads(result)
     except Exception:
         logger.exception("Trafilatura extraction failed")
@@ -150,23 +145,9 @@ def _run_trafilatura_extract(html_content: str, url: str) -> Optional[Dict[str, 
 
 @app.on_event("startup")
 def startup_event():
-    # Fail fast if trafilatura isn't available.
-    missing = []
-    if not _TRAFILATURA_AVAILABLE:
-        missing.append("trafilatura")
-    # If mandatory summarizers are missing, the import above would already have failed;
-    # this is an extra check to be explicit in logs if somehow flags are not set.
-    if not getattr(seo_desc_mod, "_SUMY_AVAILABLE", False):
-        missing.append("sumy")
-    if not getattr(seo_desc_mod, "_TRANSFORMERS_AVAILABLE", False):
-        missing.append("transformers")
-
-    if missing:
-        logger.critical("Required dependencies missing: %s", ", ".join(missing))
-        logger.critical("Install them and restart the service. Example: pip install sumy transformers sentencepiece torch")
-        raise RuntimeError(f"Missing required packages: {', '.join(missing)}")
-
-    logger.info("All required dependencies present; extractor ready.")
+    # The strict imports above will have failed if mandatory packages are missing.
+    # Log a successful readiness note.
+    logger.info("Extractor starting; required dependencies verified at import time.")
 
 
 # --- Keywords helpers (no heavy deps) ---
@@ -177,11 +158,11 @@ _STOPWORDS = {
     "is","be","or","not","we","us","they","he","she","his","her","them","its"
 }
 
-def _kw_parse_list(s: str) -> list[str]:
+
+def _kw_parse_list(s: str) -> List[str]:
     s = (s or "").strip()
     if not s:
         return []
-    # split on common separators
     parts = re.split(r"[,\|\n;\t•]+", s)
     out = []
     for p in parts:
@@ -189,7 +170,6 @@ def _kw_parse_list(s: str) -> list[str]:
         p = re.sub(r"[-_]+", " ", p).strip().lower()
         if 2 <= len(p) <= 100 and p not in ("keyword","keywords","tag","tags"):
             out.append(p)
-    # de-dup preserving order
     seen = set()
     uniq = []
     for k in out:
@@ -198,22 +178,24 @@ def _kw_parse_list(s: str) -> list[str]:
             uniq.append(k)
     return uniq
 
-def _kw_from_meta(html: str) -> list[str]:
+
+def _kw_from_meta(html: str) -> List[str]:
     kws = []
     for meta in re.findall(r"<meta\b[^>]*>", html or "", flags=re.I):
         attrs = dict(re.findall(r'(\w[\w:-]*)\s*=\s*["\']([^"\']+)["\']', meta, flags=re.I))
-        for key in ("name","property","itemprop"):
+        for key in ("name", "property", "itemprop"):
             val = (attrs.get(key) or "").lower()
-            if "keyword" in val:  # matches keywords, news_keywords, itemprop=keywords
+            if "keyword" in val:
                 content = attrs.get("content") or ""
                 kws.extend(_kw_parse_list(content))
                 break
     return kws[:20]
 
-def _kw_from_jsonld(html: str) -> list[str]:
+
+def _kw_from_jsonld(html: str) -> List[str]:
     import json
     out = []
-    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I|re.S):
+    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
         try:
             data = json.loads(m.group(1))
         except Exception:
@@ -231,104 +213,237 @@ def _kw_from_jsonld(html: str) -> list[str]:
                                     out.append(e.strip().lower())
                                 elif isinstance(e, dict) and "name" in e:
                                     out.append(str(e["name"]).strip().lower())
-    # clean + cap
     return _kw_parse_list(", ".join(out))[:20]
 
-def _kw_from_title_headers(html: str) -> list[str]:
-    parts = []
-    t = re.search(r"<title[^>]*>(.*?)</title>", html or "", flags=re.I|re.S)
-    if t:
-        parts.append(re.sub(r"\s+", " ", t.group(1)).strip())
-    for h in ("h1","h2","h3"):
-        parts += [re.sub(r"\s+", " ", m).strip()
-                  for m in re.findall(rf"<{h}[^>]*>(.*?)</{h}>", html or "", flags=re.I|re.S)]
-    text = " ".join(p for p in parts if p)
-    words = [w.lower() for w in re.split(r"\W+", text) if len(w) > 2 and w.lower() not in _STOPWORDS]
-    return list(dict.fromkeys(words))[:10]
 
-def _kw_from_text(text: str) -> list[str]:
-    words = [w.lower() for w in re.split(r"\W+", text or "") if len(w) > 3 and w.lower() not in _STOPWORDS]
-    if not words:
-        return []
-    freq = Counter(words)
-    return [w for w, c in freq.most_common(12) if c >= 2][:12]
-
-def _kw_from_url(url: str) -> list[str]:
-    try:
-        p = urlparse(url or "")
-        parts = [seg for seg in (p.path or "").split("/") if seg]
-        out = []
-        for seg in parts:
-            seg = re.sub(r"[^\w\s\-]", " ", seg)
-            seg = re.sub(r"[-_]+", " ", seg).strip().lower()
-            out += [w for w in seg.split() if len(w) > 3 and w not in _STOPWORDS]
-        return list(dict.fromkeys(out))[:5]
-    except Exception:
-        return []
-
-def _extract_keywords(html: str, url: str, text_content: str, trafi: Dict[str, Any]) -> tuple[list[str], Dict[str, Any]]:
-    # Primary: meta/JSON-LD
+# ---------------- Simplified keyword extraction (per spec) ----------------
+def _extract_keywords(html: str, url: str, text_content: str, trafi: Dict[str, Any]) -> tuple[List[str], Dict[str, Any]]:
+    """
+    Keyword extraction priority (exactly per spec):
+      1) Meta keywords (_kw_from_meta)
+      2) JSON-LD keywords (_kw_from_jsonld)
+      3) LLM-based extraction (generate_keywords_with_hf) as a best-effort fallback
+    No other fallback chains are used here.
+    """
+    # 1) Meta keywords
     meta_kws = _kw_from_meta(html)
     if meta_kws:
         return meta_kws, {"method": "primary", "source": "meta", "count": len(meta_kws)}
+
+    # 2) JSON-LD keywords
     jsonld_kws = _kw_from_jsonld(html)
     if jsonld_kws:
         return jsonld_kws, {"method": "primary", "source": "jsonld", "count": len(jsonld_kws)}
-    # Fallbacks: trafilatura tags/categories
-    trafi_kws = []
-    for k in ("tags","categories"):
-        v = trafi.get(k)
-        if isinstance(v, list):
-            trafi_kws += [str(x).strip().lower() for x in v if str(x).strip()]
-    trafi_kws = list(dict.fromkeys(trafi_kws))[:20]
-    if trafi_kws:
-        return trafi_kws, {"method": "fallback", "source": "trafilatura", "count": len(trafi_kws)}
-    # Title/headers
-    th = _kw_from_title_headers(html)
-    if th:
-        return th, {"method": "fallback", "source": "title_headers", "count": len(th)}
-    # Content frequency
-    tf = _kw_from_text(text_content)
-    if tf:
-        return tf, {"method": "fallback", "source": "content_freq", "count": len(tf)}
-    # URL path
-    uk = _kw_from_url(url)
-    if uk:
-        return uk, {"method": "fallback", "source": "url_path", "count": len(uk)}
+
+    # 3) LLM-based extraction (best-effort)
+    try:
+        ctx = text_content[:6000]
+        llm_kws = generate_keywords_with_hf(ctx, max_keywords=MAX_KEYWORDS_FROM_LLM)
+        if llm_kws:
+            return llm_kws, {"method": "llm", "source": KEYWORD_MODEL_ENV, "count": len(llm_kws)}
+    except Exception:
+        logger.exception("LLM keyword generation failed")
+
+    # None found
     return [], {"method": "none", "source": "none", "count": 0}
-# --- end keywords helpers ---
 
 
+# ---------------- Language extraction / detection ----------------
+def _normalize_lang_code(code: str) -> Optional[str]:
+    if not code:
+        return None
+    code = str(code).strip().lower()
+    code = code.replace("_", "-")
+    primary = code.split("-")[0]
+    if not primary or not primary.isalpha() or len(primary) < 2:
+        return None
+    return primary[:2].lower().capitalize()
+
+
+def _extract_languages_from_jsonld(html: str) -> List[str]:
+    import json
+    out = []
+    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    if str(k).lower() in ("inlanguage", "language", "inLanguage"):
+                        if isinstance(v, str):
+                            out.append(v)
+                        elif isinstance(v, list):
+                            for e in v:
+                                if isinstance(e, str):
+                                    out.append(e)
+    norm = []
+    for c in out:
+        n = _normalize_lang_code(c)
+        if n and n not in norm:
+            norm.append(n)
+    return norm
+
+
+def _extract_languages(html: str, text_content: str, trafi: Dict[str, Any]) -> tuple[List[str], Dict[str, Any]]:
+    langs: List[str] = []
+    source_details = {}
+
+    # 1) trafilatura-provided language
+    trafi_lang = trafi.get("language")
+    if isinstance(trafi_lang, str) and trafi_lang.strip():
+        n = _normalize_lang_code(trafi_lang)
+        if n:
+            langs.append(n)
+            source_details["trafilatura"] = str(trafi_lang)
+
+    # 2) HTML lang attribute and meta tags (BeautifulSoup required)
+    try:
+        soup = BeautifulSoup(html or "", "lxml")
+        html_tag = soup.find("html")
+        if html_tag:
+            lang_attr = (html_tag.get("lang") or "").strip()
+            n = _normalize_lang_code(lang_attr)
+            if n and n not in langs:
+                langs.append(n)
+                source_details["html_lang"] = lang_attr
+
+        og = soup.find("meta", attrs={"property": "og:locale"})
+        if og and og.get("content"):
+            n = _normalize_lang_code(og.get("content"))
+            if n and n not in langs:
+                langs.append(n)
+                source_details["og:locale"] = og.get("content")
+
+        tw = soup.find("meta", attrs={"name": "twitter:language"})
+        if tw and tw.get("content"):
+            n = _normalize_lang_code(tw.get("content"))
+            if n and n not in langs:
+                langs.append(n)
+                source_details["twitter:language"] = tw.get("content")
+    except Exception:
+        pass
+
+    # 3) JSON-LD
+    try:
+        jld = _extract_languages_from_jsonld(html)
+        for n in jld:
+            if n not in langs:
+                langs.append(n)
+        if jld:
+            source_details["jsonld"] = jld
+    except Exception:
+        pass
+
+    if langs:
+        return langs[:MAX_LANGUAGES], {"method": "extracted", "source_details": source_details, "count": len(langs)}
+
+    # 4) Fallback: langdetect
+    detected: List[str] = []
+    try:
+        candidates = []
+        if text_content:
+            candidates.append(text_content[:20000])
+            paras = [p for p in text_content.split("\n") if p.strip()][:3]
+            candidates += paras
+        probs = {}
+        for c in candidates:
+            try:
+                langs_probs = detect_langs(c)
+            except Exception:
+                continue
+            for lp in langs_probs:
+                code = lp.lang
+                prob = lp.prob
+                if code and prob:
+                    probs[code] = max(probs.get(code, 0.0), prob)
+        ordered = sorted(probs.items(), key=lambda x: -x[1])
+        for code, p in ordered:
+            if p >= LANG_DETECT_PROB_THRESHOLD:
+                n = _normalize_lang_code(code)
+                if n and n not in detected:
+                    detected.append(n)
+            if len(detected) >= MAX_LANGUAGES:
+                break
+    except Exception:
+        detected = []
+
+    if detected:
+        return detected, {"method": "detected", "source_details": {"probs": dict(ordered[:MAX_LANGUAGES])}, "count": len(detected)}
+
+    return [], {"method": "none", "source_details": {}, "count": 0}
+
+
+# -------------------- Contact info extraction --------------------
+def _extract_contact_info(html: str, text: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract contact info from the HTML blob and visible text.
+    Returns a dict with keys like emails, phones, faxes, social_media (maps to platform->[links]).
+    Returns None if nothing found.
+    """
+    contact_info: Dict[str, Any] = {}
+    emails = set(re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", html))
+    if emails:
+        contact_info["emails"] = sorted(emails)
+
+    # Phone-like sequences (simple heuristics)
+    phone_candidates = set(re.findall(r"(?:\+?\d[\d\-\s().]{6,}\d)", html))
+    phones = []
+    for p in phone_candidates:
+        normalized = re.sub(r"[^\d+]", "", p)
+        # crude length check
+        if len(re.sub(r"[^\d]", "", normalized)) >= 7:
+            phones.append(normalized)
+    if phones:
+        contact_info["phones"] = sorted(set(phones))
+
+    # Fax heuristics (look for the word 'fax' nearby)
+    fax_matches = []
+    for match in re.finditer(r"(fax[:\s]*)([\+\d][\d\-\s().]{6,}\d)", html, flags=re.I):
+        raw = match.group(2)
+        normalized = re.sub(r"[^\d+]", "", raw)
+        if len(re.sub(r"[^\d]", "", normalized)) >= 7:
+            fax_matches.append(normalized)
+    if fax_matches:
+        contact_info["faxes"] = sorted(set(fax_matches))
+
+    # Social media link extraction (common platforms)
+    social_patterns = {
+        "facebook": r"https?://(?:www\.)?facebook\.com/[^\s\"'>]+",
+        "twitter": r"https?://(?:www\.)?twitter\.com/[^\s\"'>]+",
+        "instagram": r"https?://(?:www\.)?instagram\.com/[^\s\"'>]+",
+        "linkedin": r"https?://(?:www\.)?linkedin\.com/[^\s\"'>]+",
+        "youtube": r"https?://(?:www\.)?youtube\.com/[^\s\"'>]+",
+        "telegram": r"https?://(?:t\.me|telegram\.me)/[^\s\"'>]+",
+        "whatsapp": r"https?://wa\.me/[^\s\"'>]+",
+    }
+    social_found: Dict[str, List[str]] = {}
+    for platform, patt in social_patterns.items():
+        matches = re.findall(patt, html, flags=re.I)
+        if matches:
+            social_found[platform] = sorted(set(matches))
+    if social_found:
+        contact_info["social_media"] = social_found
+
+    return contact_info if contact_info else None
+
+
+# -------------------- Main extract endpoint --------------------
 @app.post("/extract", response_model=ExtractResponse, responses={204: {"description": "No content extracted"}})
 async def extract_endpoint(payload: ExtractRequest):
-    """
-    Extract content from provided raw HTML and return JSON-ready document.
-    """
-    if not _TRAFILATURA_AVAILABLE:
-        raise HTTPException(status_code=500, detail="Trafilatura not installed on server")
-
-    html = payload.html_content or ""
-    if not html:
+    if not payload or not payload.html_content:
         raise HTTPException(status_code=400, detail="html_content must be provided and non-empty")
 
-    # Optional: short-circuit if caller told us the content-type is not HTML/XML
-    ctype = None
-    if payload.fetch_metadata:
-        ctype = payload.fetch_metadata.get("content_type") or payload.fetch_metadata.get("Content-Type")
-    if ctype and ("html" not in ctype.lower() and "xml" not in ctype.lower()):
-        logger.info("Non-HTML content-type %s for %s; returning 204", ctype, payload.url)
-        return JSONResponse(status_code=204, content=None)
-
-    # Quick heuristic: reject if doesn't look like HTML
+    html = payload.html_content or ""
     if "<" not in html:
         logger.info("html_content doesn't look like HTML for %s; returning 204", payload.url)
         return JSONResponse(status_code=204, content=None)
 
     if len(html) > MAX_HTML_LENGTH:
-        # Defensive: avoid feeding extremely large inputs
         raise HTTPException(status_code=400, detail=f"html_content exceeds maximum allowed length of {MAX_HTML_LENGTH}")
 
-    # Offload extraction to thread to allow timeout
     future = _executor.submit(_run_trafilatura_extract, html, str(payload.url))
     try:
         data = future.result(timeout=EXTRACTION_TIMEOUT)
@@ -340,59 +455,64 @@ async def extract_endpoint(payload: ExtractRequest):
         raise HTTPException(status_code=500, detail="Extraction failed")
 
     if not data:
-        # No data returned by trafilatura (could be too short or parsing issue)
         return JSONResponse(status_code=204, content=None)
 
     text_content = (data.get("text") or "").strip()
     if not text_content or len(text_content) < MIN_EXTRACTED_CHARS:
-        # Too short to be useful
         logger.info("Extracted text is empty or too short")
         return JSONResponse(status_code=204, content=None)
 
-    # Title fallback: trafilatura -> fetch_metadata -> empty
     title = (data.get("title") or "").strip()
     if not title and payload.fetch_metadata:
         title = (payload.fetch_metadata.get("title") or "").strip()
 
-    # --- SEO description selection (preferred order) ---
-    # 1) trafilatura's description (preferred)
-    # 2) HTML meta description (og:, twitter:, name=description)
-    # 3) generated description (transformers/sumy/simple)
+    # --- SEO description prioritization (per spec) ---
     seo_desc_source = None
-    seo_desc_val = None
+    seo_desc_val: Optional[str] = None
 
-    # 1) trafilatura-provided description
+    # 1) trafilatura description (preferred) — NORMALIZE but DO NOT CLAMP
     trafi_desc_raw = (data.get("description") or "").strip()
     if trafi_desc_raw:
         try:
-            # normalize/unescape and clamp using helpers from seo_description module
             norm = _normalize_whitespace(unescape(st := trafi_desc_raw))
-            seo_desc_val = _clamp(norm, SEO_DESC_MAX_CHARS)
+            seo_desc_val = norm  # NOTE: do not clamp here per spec
             seo_desc_source = "trafilatura"
         except Exception:
-            # Fallback simple clamp
-            cand = unescape(strafi := trafi_desc_raw)
-            if len(cand) > SEO_DESC_MAX_CHARS:
-                seo_desc_val = cand[:SEO_DESC_MAX_CHARS].rstrip() + "…"
-            else:
-                seo_desc_val = cand
+            cand = unescape(trafi_desc_raw)
+            seo_desc_val = cand
             seo_desc_source = "trafilatura"
 
-    # 2) HTML meta description
+    # 2) HTML meta description (BeautifulSoup required) — NORMALIZE but DO NOT CLAMP
     if not seo_desc_val:
         md = extract_meta_description(html, max_chars=SEO_DESC_MAX_CHARS)
         if md:
-            seo_desc_val = md
+            seo_desc_val = md  # already normalized by extract_meta_description
             seo_desc_source = "meta"
 
-    # 3) generated fallback
+    # 3) generated (transformers -> sumy). Generated output WILL be clamped in generate_description
     if not seo_desc_val:
-        seo_desc_val, gen_src = generate_description(text_content, mode=SEO_DESC_MODE, max_chars=SEO_DESC_MAX_CHARS)
-        seo_desc_source = gen_src
+        try:
+            seo_desc_val, gen_src = generate_description(text_content, mode=SEO_DESC_MODE, max_chars=SEO_DESC_MAX_CHARS)
+            seo_desc_source = gen_src
+        except Exception:
+            logger.exception("Description generation failed")
+            seo_desc_val = None
+            seo_desc_source = None
 
     seo_desc = seo_desc_val or None
 
-    extraction_metadata = {
+    # languages
+    languages_list, lang_meta = _extract_languages(html, text_content, data)
+    languages = languages_list or None
+
+    # contact info
+    try:
+        contact_us = _extract_contact_info(html, text_content)
+    except Exception:
+        logger.exception("Contact extraction failed")
+        contact_us = None
+
+    extraction_metadata: Dict[str, Any] = {
         "method": "trafilatura",
         "trafilatura": {
             "author": data.get("author"),
@@ -410,7 +530,7 @@ async def extract_endpoint(payload: ExtractRequest):
         "character_count": len(text_content),
         "received_html_chars": len(html),
     }
-    # Attach SEO description provenance
+
     if seo_desc:
         extraction_metadata["seo_description"] = {
             "source": seo_desc_source,
@@ -419,15 +539,20 @@ async def extract_endpoint(payload: ExtractRequest):
             "mode": SEO_DESC_MODE,
         }
 
-    timestamp_ms = int(time.time() * 1000)
+    extraction_metadata["languages"] = lang_meta
+    if contact_us:
+        extraction_metadata["contact_us_extracted"] = True
+
     document_id = _doc_id_for(payload.company_id, str(payload.url))
 
-    # NEW: keywords
+    # keywords
     keywords, kw_meta = _extract_keywords(html, str(payload.url), text_content, data)
     if keywords:
         extraction_metadata["keywords"] = kw_meta
 
-    response_doc = {
+    timestamp_ms = int(time.time() * 1000)
+
+    response_doc: Dict[str, Any] = {
         "document_id": document_id,
         "url": str(payload.url),
         "company_id": payload.company_id or str(payload.url),
@@ -435,6 +560,8 @@ async def extract_endpoint(payload: ExtractRequest):
         "content": text_content,
         "seo_description": seo_desc or None,
         "keywords": keywords or None,
+        "languages": languages or None,
+        "contact_us": contact_us or None,
         "metadata": payload.metadata or {},
         "extraction_metadata": extraction_metadata,
         "timestamp": timestamp_ms,
@@ -445,6 +572,5 @@ async def extract_endpoint(payload: ExtractRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    import os
-    # Run with: python app.py
     uvicorn.run("extractor.app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), log_level="info")
+
