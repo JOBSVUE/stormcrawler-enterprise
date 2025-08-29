@@ -11,15 +11,15 @@ config:
   # General StormCrawler settings - DISABLE emitting outlinks
   parser.emitOutlinks: false
   # Keep crawl at depth 0 (no link expansion)
-  spout.max.depth: 0
+  spout.max.depth: 2  # allow sitemap URLs (>0) to be enqueued/fetched
   urlfilter.refreshConfigurationInBolt: true
   
   # User agent configuration
   http.agent.name: "StormCrawler Enterprise"
   http.agent.version: "1.0"
   http.agent.description: "Enterprise web crawler"
-  http.agent.url: "https://example.org/"
-  http.agent.email: "someone@example.org"
+  http.agent.url: "https://ai-bees-search-engine.org/"
+  http.agent.email: "someone@ai-bees-search-engine.org"
 
   # Fetcher behavior
   fetcher.server.delay: 1.0

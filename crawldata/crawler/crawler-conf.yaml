@@ -56,8 +56,8 @@ parser.emitOutlinks: false
 http.agent.name:        "oracle-crawler"
 http.agent.version:     "1.0"
 http.agent.description: "StormCrawler with Oracle backend"
-http.agent.url:         "https://example.com"
-http.agent.email:       "admin@example.com"
+http.agent.url:         "https://ai-bees-search-engine-search-engine.com"
+http.agent.email:       "admin@ai-bees-search-engine.com"
 
 # URL / parse filters with normalization
 urlfilters.config.file: "urlfilters.json"

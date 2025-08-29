@@ -14,7 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python deps
 COPY extractor/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.txt
+    pip install --no-cache-dir -r /app/requirements.txt && \
+    # Ensure strict, import-time requirements are present
+    pip install --no-cache-dir \
+      trafilatura \
+      beautifulsoup4 \
+      lxml \
+      sumy \
+      transformers \
+      langdetect \
+      phonenumbers
 
 # Copy app
 COPY extractor /app/extractor
@@ -29,7 +38,8 @@ USER appuser
 EXPOSE 8000
 ENV PORT=8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Give the app more time to become ready
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]

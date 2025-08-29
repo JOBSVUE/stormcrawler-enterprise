@@ -61,6 +61,9 @@ class RenderResponse(BaseModel):
 
 @app.get("/health")
 async def health():
+    # Report unhealthy until browser is ready
+    if _browser is None:
+        raise HTTPException(status_code=503, detail="starting")
     return {"status": "ok"}
 
 

@@ -36,4 +36,8 @@ RUN chmod +x /app/entrypoint.sh
 
 EXPOSE ${PORT}
 
+# Healthcheck for readiness
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+
 ENTRYPOINT ["/app/entrypoint.sh"]

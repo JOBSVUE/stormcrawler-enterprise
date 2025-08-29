@@ -1,4 +1,3 @@
-# seo_description.py
 """
 SEO description & keyword helpers for the extractor service.
 
@@ -17,6 +16,7 @@ import os
 from typing import Optional, Tuple, List
 from html import unescape
 import logging
+import threading
 
 logger = logging.getLogger("seo_description")
 
@@ -228,6 +228,8 @@ def generate_description(text: str, mode: str = "c", max_chars: int = 160) -> Tu
 # ---------------- LLM-based keyword generation helpers ----------------
 _KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "google/flan-t5-large")
 _keyword_pipeline = None
+# concurrency limiter for heavy LLM calls (protects system when multiple requests trigger LLM)
+_LLM_SEMAPHORE = threading.Semaphore(int(os.getenv("LLM_MAX_CONCURRENCY", "1")))
 
 
 def _ensure_keyword_pipeline():
@@ -245,6 +247,39 @@ def _ensure_keyword_pipeline():
             _keyword_pipeline = None
             raise
     return _keyword_pipeline
+
+
+def _postprocess_llm_raw(raw: str) -> List[str]:
+    """
+    Clean up the model output string and return a list of normalized keywords.
+    - Remove leading numbering/bullets.
+    - Split by comma/newlines/semicolon.
+    - Remove punctuation but keep unicode word chars and hyphens.
+    - Normalize to lowercase and dedupe preserving order.
+    """
+    if not raw:
+        return []
+    # remove common lead tokens like "1.", "1)", "- ", "•", "1 -", "1 - " etc.
+    # use unicode bullet ranges minimally
+    raw = re.sub(r'^\s*(?:[\d]+[.)\-\:]\s*|\-+\s*|•\s*|·\s*|\u2022\s*)', '', raw.strip())
+    parts = [p.strip() for p in re.split(r"[,\n;]+", raw) if p.strip()]
+    cleaned = []
+    for p in parts:
+        # strip leading numbering/dashes again per item
+        p = re.sub(r'^\s*[\d\.\-\)\:\u2022]+\s*', '', p)
+        # keep unicode letters, numbers, whitespace and hyphen
+        p = re.sub(r"[^\w\s\-]", "", p, flags=re.UNICODE)
+        p = re.sub(r"[-_]+", " ", p).strip().lower()
+        if 2 <= len(p) <= 100:
+            cleaned.append(p)
+    # dedupe preserving order
+    seen = set()
+    uniq = []
+    for c in cleaned:
+        if c and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
 
 
 def generate_keywords_with_hf(text: str, max_keywords: int = 12) -> List[str]:
@@ -267,7 +302,9 @@ def generate_keywords_with_hf(text: str, max_keywords: int = 12) -> List[str]:
     )
 
     try:
-        out = pipe(prompt, max_length=128, do_sample=False)
+        # protect concurrent LLM invocations
+        with _LLM_SEMAPHORE:
+            out = pipe(prompt, max_length=128, do_sample=False)
     except Exception:
         logger.exception("Keyword pipeline generation failed")
         return []
@@ -277,16 +314,6 @@ def generate_keywords_with_hf(text: str, max_keywords: int = 12) -> List[str]:
 
     first = out[0]
     raw = first.get("generated_text") or first.get("text") or str(first)
-    # Split and normalize
-    parts = [p.strip().lower() for p in re.split(r"[,\n;]+", raw) if p.strip()]
-    parts = [re.sub(r"[^\w\s\-]", "", p) for p in parts]  # remove punctuation
-    parts = [p for p in parts if 2 <= len(p) <= 100]
-    seen = set()
-    uniq = []
-    for p in parts:
-        if p and p not in seen:
-            seen.add(p)
-            uniq.append(p)
-        if len(uniq) >= max_keywords:
-            break
-    return uniq
+    parts = _postprocess_llm_raw(raw)
+    # finalize length cap
+    return parts[:max_keywords]

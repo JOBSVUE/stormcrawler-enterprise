@@ -48,11 +48,15 @@ wait_for_port oracle-test 1521 "Oracle database"
 wait_for_port elasticsearch 9200 "Elasticsearch"
 wait_for_port nimbus 6627 "Storm Nimbus"
 wait_for_port extractor 8000 "Extractor API"
+wait_for_port js-renderer 8001 "JS Renderer"
 
 # 5) Submit the topology with retries
 echo "Submitting topology to Storm…"
 max_retries=3
 retry_count=0
+
+# Allow runtime override of crawl depth (default 1 to index sitemap URLs)
+SPOUT_MAX_DEPTH="${SPOUT_MAX_DEPTH:-1}"
 
 until storm jar \
     target/stormcrawler-digitalpebble-1.0-SNAPSHOT.jar \
@@ -62,6 +66,7 @@ until storm jar \
     -c sql.user="${JDBC_USER}" \
     -c sql.password="${JDBC_PASS}" \
     -c sql.status.table="crawl_queue" \
+    -c spout.max.depth="${SPOUT_MAX_DEPTH}" \
     src/main/resources/base-topology.flux
 do
   retry_count=$((retry_count + 1))

@@ -1,6 +1,4 @@
 """
-extract_api_rest.py
-
 FastAPI REST service that accepts raw HTML (JSON POST) and returns extracted JSON ready for indexing.
 """
 
@@ -25,20 +23,27 @@ try:
 except Exception as e:
     raise ImportError("trafilatura is required. Install with: pip install trafilatura") from e
 
+# Require phonenumbers for phone normalization (mandatory per request)
+try:
+    import phonenumbers  # type: ignore
+    from phonenumbers import NumberParseException, PhoneNumberFormat
+except Exception as e:
+    raise ImportError("phonenumbers is required. Install with: pip install phonenumbers") from e
+
 # SEO helpers — these imports will fail if required summarizers / parsers are missing
 try:
-    from .seo_description import (
+    from .extraction_helpers import (
         extract_meta_description,
         generate_description,
         _normalize_whitespace,
         _clamp,
         generate_keywords_with_hf,
     )
-    from . import seo_description as seo_desc_mod
+    from . import extraction_helpers as seo_desc_mod
 except Exception as e:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("extract_api_rest")
-    logger.critical("Failed to import seo_description or mandatory summarization libraries: %s", e)
+    logger.critical("Failed to import extraction_helpers or mandatory summarization libraries: %s", e)
     raise
 
 # langdetect (mandatory for language detection fallback)
@@ -47,7 +52,7 @@ try:
 except Exception as e:
     raise ImportError("langdetect is required. Install with: pip install langdetect") from e
 
-# BeautifulSoup is already enforced in seo_description.py; import for HTML lang parsing
+# BeautifulSoup is already enforced in extraction_helpers.py; import for HTML lang parsing
 from bs4 import BeautifulSoup  # type: ignore
 
 # Configuration defaults
@@ -166,20 +171,57 @@ def _kw_parse_list(s: str) -> List[str]:
     parts = re.split(r"[,\|\n;\t•]+", s)
     out = []
     for p in parts:
-        p = re.sub(r"[^\w\s\-]", " ", p)
+        p = re.sub(r"[^\w\s\-]", " ", p)  # keep unicode word chars, spaces, hyphens
         p = re.sub(r"[-_]+", " ", p).strip().lower()
         if 2 <= len(p) <= 100 and p not in ("keyword","keywords","tag","tags"):
             out.append(p)
+    # dedupe preserving order
     seen = set()
     uniq = []
     for k in out:
         if k and k not in seen:
             seen.add(k)
             uniq.append(k)
-    return uniq
+    # filter stopwords
+    filtered = [k for k in uniq if k not in _STOPWORDS]
+    return filtered
 
 
 def _kw_from_meta(html: str) -> List[str]:
+    """
+    Robust meta keyword extraction using BeautifulSoup.
+    Looks for meta tags where name/property/itemprop contains 'keyword' (case-insensitive)
+    and extracts content/value.
+    """
+    if not html:
+        return []
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except Exception:
+        # fallback to regex-based extraction if BeautifulSoup fails (very defensive)
+        return _kw_from_meta_regex(html)
+
+    candidates: List[str] = []
+    try:
+        for tag in soup.find_all("meta"):
+            name_attr = ""
+            # check common attributes
+            for a in ("name", "property", "itemprop"):
+                if tag.has_attr(a):
+                    name_attr = (tag.get(a) or "").lower()
+                    if "keyword" in name_attr:
+                        content = (tag.get("content") or tag.get("value") or "").strip()
+                        if content:
+                            candidates.extend(_kw_parse_list(content))
+                        break
+    except Exception:
+        # in case of unexpected tag structures, fallback
+        return _kw_from_meta_regex(html)
+    return candidates[:20]
+
+
+def _kw_from_meta_regex(html: str) -> List[str]:
+    # Original regex fallback for extreme edge cases
     kws = []
     for meta in re.findall(r"<meta\b[^>]*>", html or "", flags=re.I):
         attrs = dict(re.findall(r'(\w[\w:-]*)\s*=\s*["\']([^"\']+)["\']', meta, flags=re.I))
@@ -193,11 +235,75 @@ def _kw_from_meta(html: str) -> List[str]:
 
 
 def _kw_from_jsonld(html: str) -> List[str]:
-    import json
+    """
+    Robust JSON-LD keyword extraction using BeautifulSoup to find script tags
+    and json.loads on their contents. Handles arrays, dicts, nested 'keyword' keys,
+    and values which may be strings, lists, or objects with 'name'.
+    """
+    if not html:
+        return []
+
+    out = []
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except Exception:
+        # fallback to the regex-based approach used previously
+        return _kw_from_jsonld_regex(html)
+
+    try:
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = script.string or script.get_text() or ""
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                # skip invalid JSON blocks
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # search for keys containing "keyword" (case-insensitive)
+                for k, v in item.items():
+                    if "keyword" in str(k).lower():
+                        if isinstance(v, str):
+                            out.extend(_kw_parse_list(v))
+                        elif isinstance(v, list):
+                            for e in v:
+                                if isinstance(e, str):
+                                    out.extend(_kw_parse_list(e))
+                                elif isinstance(e, dict) and "name" in e:
+                                    name_val = e.get("name") or ""
+                                    if isinstance(name_val, str):
+                                        out.extend(_kw_parse_list(name_val))
+                        elif isinstance(v, dict) and "name" in v:
+                            name_val = v.get("name") or ""
+                            if isinstance(name_val, str):
+                                out.extend(_kw_parse_list(name_val))
+                # also check common schema fields which sometimes carry keywords
+                if "about" in item and isinstance(item["about"], (str, list, dict)):
+                    maybe = item["about"]
+                    if isinstance(maybe, str):
+                        out.extend(_kw_parse_list(maybe))
+                    elif isinstance(maybe, list):
+                        for e in maybe:
+                            if isinstance(e, str):
+                                out.extend(_kw_parse_list(e))
+                            elif isinstance(e, dict) and "name" in e:
+                                out.extend(_kw_parse_list(str(e["name"])))
+    except Exception:
+        return _kw_from_jsonld_regex(html)
+
+    return _kw_parse_list(", ".join(out))[:20]
+
+
+def _kw_from_jsonld_regex(html: str) -> List[str]:
+    import json as _json
     out = []
     for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
         try:
-            data = json.loads(m.group(1))
+            data = _json.loads(m.group(1))
         except Exception:
             continue
         items = data if isinstance(data, list) else [data]
@@ -376,40 +482,289 @@ def _extract_languages(html: str, text_content: str, trafi: Dict[str, Any]) -> t
     return [], {"method": "none", "source_details": {}, "count": 0}
 
 
-# -------------------- Contact info extraction --------------------
-def _extract_contact_info(html: str, text: str) -> Optional[Dict[str, Any]]:
+# -------------------- Contact info extraction (enhanced) --------------------
+def _guess_country_from_html_url(html: str, url: str, trafi: Dict[str, Any]) -> Optional[str]:
     """
-    Extract contact info from the HTML blob and visible text.
-    Returns a dict with keys like emails, phones, faxes, social_media (maps to platform->[links]).
-    Returns None if nothing found.
+    Heuristic to guess ISO country code (2-letter) to assist phonenumbers parsing.
+    Order:
+      1) JSON-LD address country (if present)
+      2) meta property og:locale (en_US -> US)
+      3) html lang with region (en-US -> US)
+      4) TLD mapping for common country-code TLDs (.de -> DE)
+      5) trafilatura sitename country? (not reliable)
+      6) None (caller must handle)
     """
-    contact_info: Dict[str, Any] = {}
-    emails = set(re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", html))
-    if emails:
-        contact_info["emails"] = sorted(emails)
+    try:
+        soup = BeautifulSoup(html or "", "lxml")
+    except Exception:
+        soup = None
 
-    # Phone-like sequences (simple heuristics)
-    phone_candidates = set(re.findall(r"(?:\+?\d[\d\-\s().]{6,}\d)", html))
-    phones = []
-    for p in phone_candidates:
-        normalized = re.sub(r"[^\d+]", "", p)
-        # crude length check
-        if len(re.sub(r"[^\d]", "", normalized)) >= 7:
-            phones.append(normalized)
-    if phones:
-        contact_info["phones"] = sorted(set(phones))
+    # 1) JSON-LD address country
+    try:
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
+            try:
+                data = json.loads(m.group(1))
+            except Exception:
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict):
+                    addr = item.get("address") or item.get("Address") or item.get("postalAddress")
+                    if isinstance(addr, dict):
+                        country = addr.get("addressCountry") or addr.get("country")
+                        if isinstance(country, str) and len(country.strip()) >= 2:
+                            return country.strip().upper()
+    except Exception:
+        pass
 
-    # Fax heuristics (look for the word 'fax' nearby)
-    fax_matches = []
-    for match in re.finditer(r"(fax[:\s]*)([\+\d][\d\-\s().]{6,}\d)", html, flags=re.I):
-        raw = match.group(2)
-        normalized = re.sub(r"[^\d+]", "", raw)
-        if len(re.sub(r"[^\d]", "", normalized)) >= 7:
-            fax_matches.append(normalized)
-    if fax_matches:
-        contact_info["faxes"] = sorted(set(fax_matches))
+    # 2) og:locale
+    try:
+        if soup:
+            og = soup.find("meta", attrs={"property": "og:locale"})
+            if og and og.get("content"):
+                c = og.get("content")
+                if "_" in c:
+                    return c.split("_")[-1].upper()
+                if "-" in c:
+                    return c.split("-")[-1].upper()
+    except Exception:
+        pass
 
-    # Social media link extraction (common platforms)
+    # 3) html lang attribute with region
+    try:
+        if soup:
+            html_tag = soup.find("html")
+            if html_tag:
+                lang_attr = (html_tag.get("lang") or "").strip()
+                if "-" in lang_attr:
+                    return lang_attr.split("-")[-1].upper()
+                if "_" in lang_attr:
+                    return lang_attr.split("_")[-1].upper()
+    except Exception:
+        pass
+
+    # 4) tld mapping for common TLDs
+    try:
+        parsed = urlparse(url or "")
+        host = (parsed.netloc or "").lower()
+        if host:
+            # strip port
+            host = host.split(":")[0]
+            parts = host.split(".")
+            if len(parts) > 1:
+                tld = parts[-1]
+                tld_map = {
+                    "us": "US", "uk": "GB", "co": None, "de": "DE", "fr": "FR",
+                    "ir": "IR", "ca": "CA", "au": "AU", "nl": "NL", "es": "ES",
+                    "it": "IT", "ch": "CH", "se": "SE", "no": "NO", "be": "BE",
+                    "dk": "DK", "fi": "FI", "at": "AT", "br": "BR", "in": "IN",
+                    "jp": "JP", "kr": "KR"
+                }
+                if tld in tld_map and tld_map[tld]:
+                    return tld_map[tld]
+    except Exception:
+        pass
+
+    # 5) trafilatura site info (best-effort)
+    try:
+        sitename = trafi.get("sitename") if isinstance(trafi, dict) else None
+        if sitename and isinstance(sitename, str) and len(sitename) >= 2:
+            # nothing robust here — skip
+            pass
+    except Exception:
+        pass
+
+    return None
+
+
+def _format_e164(candidate: str, region_hint: Optional[str]) -> Optional[str]:
+    """
+    Try to parse candidate phone string into E.164 with phonenumbers.
+    Returns E.164 string on success, otherwise None.
+    """
+    if not candidate or not candidate.strip():
+        return None
+    raw = candidate.strip()
+    # Remove common surrounding text
+    raw = re.sub(r"(tel:|phone:|\s+ext[:\.]?\s*\d+)$", "", raw, flags=re.I).strip()
+    # If string contains known anchors like "Call us: +49 30 ..." keep them
+    try:
+        if raw.startswith("+"):
+            num = phonenumbers.parse(raw, None)
+        else:
+            # try region hint if provided
+            if region_hint:
+                num = phonenumbers.parse(raw, region_hint)
+            else:
+                # fallback: try 'US' parse attempt
+                try:
+                    num = phonenumbers.parse(raw, "US")
+                except NumberParseException:
+                    num = phonenumbers.parse(raw, None)
+        if phonenumbers.is_valid_number(num):
+            return phonenumbers.format_number(num, PhoneNumberFormat.E164)
+        # if not valid but possible, still attempt E164 of the country code if available
+        if phonenumbers.is_possible_number(num):
+            try:
+                return phonenumbers.format_number(num, PhoneNumberFormat.E164)
+            except Exception:
+                return None
+    except NumberParseException:
+        return None
+    except Exception:
+        return None
+    return None
+
+
+def _extract_addresses_from_jsonld(html: str) -> List[Dict[str, Any]]:
+    """
+    Extract structured addresses from JSON-LD (schema.org PostalAddress or address fields).
+    Returns list of dicts with fields:
+      streetAddress, addressLocality, addressRegion, postalCode, addressCountry, raw
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
+            try:
+                data = json.loads(m.group(1))
+            except Exception:
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # Direct PostalAddress object
+                if item.get("@type") and str(item.get("@type")).lower() in ("postaladdress", "address"):
+                    addr = {
+                        "streetAddress": item.get("streetAddress"),
+                        "addressLocality": item.get("addressLocality"),
+                        "addressRegion": item.get("addressRegion"),
+                        "postalCode": item.get("postalCode"),
+                        "addressCountry": item.get("addressCountry"),
+                        "raw": _normalize_whitespace(" ".join(filter(None, [
+                            item.get("streetAddress") or "",
+                            item.get("addressLocality") or "",
+                            item.get("addressRegion") or "",
+                            item.get("postalCode") or "",
+                            item.get("addressCountry") or ""
+                        ])))
+                    }
+                    out.append({k: v for k, v in addr.items() if v})
+                # Nested address fields (e.g. in Organization, LocalBusiness)
+                for k, v in item.items():
+                    if k.lower() == "address" and isinstance(v, dict):
+                        addr = {
+                            "streetAddress": v.get("streetAddress"),
+                            "addressLocality": v.get("addressLocality"),
+                            "addressRegion": v.get("addressRegion"),
+                            "postalCode": v.get("postalCode"),
+                            "addressCountry": v.get("addressCountry"),
+                            "raw": _normalize_whitespace(" ".join(filter(None, [
+                                v.get("streetAddress") or "",
+                                v.get("addressLocality") or "",
+                                v.get("addressRegion") or "",
+                                v.get("postalCode") or "",
+                                v.get("addressCountry") or ""
+                            ])))
+                        }
+                        out.append({k: v for k, v in addr.items() if v})
+    except Exception:
+        pass
+    return out
+
+
+def _extract_addresses_from_tags_and_text(html: str) -> List[Dict[str, Any]]:
+    """
+    Look for <address> tags and also do a heuristic scan for address-like lines.
+    Heuristic lines: lines containing street words + digits or postal code patterns.
+    Returns list of {streetAddress..., raw}
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        soup = BeautifulSoup(html or "", "lxml")
+    except Exception:
+        soup = None
+
+    # 1) <address> tags
+    if soup:
+        for addr_tag in soup.find_all("address"):
+            txt = addr_tag.get_text(separator=" ", strip=True)
+            if txt:
+                parts = [p.strip() for p in re.split(r"[\n,;]+", txt) if p.strip()]
+                # attempt simple structuring: last part might be "City, Region postal"
+                struct = {"raw": txt}
+                if parts:
+                    # heuristics: find postal code-like token
+                    postal = None
+                    for p in parts[::-1]:
+                        if re.search(r"\d{3,6}", p):
+                            postal = p
+                            break
+                    struct["streetAddress"] = parts[0] if len(parts) >= 1 else None
+                    if len(parts) >= 2:
+                        struct["addressLocality"] = parts[1]
+                    if postal:
+                        struct["postalCode"] = postal
+                out.append({k: v for k, v in struct.items() if v})
+    # 2) Heuristic scan in visible text: look for lines with street keywords or postal code patterns
+    text_blocks = []
+    try:
+        if soup:
+            # gather sensible text blocks like paragraphs, divs, lis
+            for tag in soup.find_all(["p", "div", "li"]):
+                t = tag.get_text(separator=" ", strip=True)
+                if t and len(t) < 400 and (len(t.split()) >= 3):
+                    text_blocks.append(t)
+        else:
+            # fallback to raw html stripped
+            text_blocks = re.split(r"[\n\r]+", re.sub(r"<[^>]+>", "\n", html or ""))
+    except Exception:
+        text_blocks = []
+
+    # heuristics for address-like text
+    address_keywords = r"\b(street|st\.|road|rd\.|avenue|ave\.|boulevard|blvd|lane|ln\.|way|platz|straße|strasse|خیابان|No\.|No:|suite|apt|apartment)\b"
+    postal_pattern = r"\b\d{3,6}\b"
+    for block in text_blocks:
+        if re.search(address_keywords, block, flags=re.I) or re.search(postal_pattern, block):
+            # further filter out phone-like text: reject if too many digits relative to letters
+            digits = len(re.findall(r"\d", block))
+            letters = len(re.findall(r"[A-Za-z\u00C0-\u017F\u0600-\u06FF]", block))
+            if digits > letters * 2 and digits > 6:
+                # likely a phone cluster, skip
+                continue
+            # candidate
+            raw = _normalize_whitespace(block)
+            # try to split into street, city etc by commas
+            parts = [p.strip() for p in re.split(r"[,\n;]+", raw) if p.strip()]
+            struct = {"raw": raw}
+            if parts:
+                struct["streetAddress"] = parts[0]
+                if len(parts) >= 2:
+                    struct["addressLocality"] = parts[1]
+                # find postal code
+                for p in parts:
+                    m = re.search(r"(\b\d{3,6}\b)", p)
+                    if m:
+                        struct["postalCode"] = m.group(1)
+                        break
+            out.append({k: v for k, v in struct.items() if v})
+
+    # dedupe by raw
+    seen_raw = set()
+    uniq = []
+    for a in out:
+        r = a.get("raw") or ""
+        if r and r not in seen_raw:
+            seen_raw.add(r)
+            uniq.append(a)
+    return uniq
+
+
+def _extract_social_media(html: str) -> Dict[str, List[str]]:
+    """
+    Extract social media profile URLs from HTML; prefer href attributes and absolute URLs.
+    Returns dict platform -> [urls]
+    """
     social_patterns = {
         "facebook": r"https?://(?:www\.)?facebook\.com/[^\s\"'>]+",
         "twitter": r"https?://(?:www\.)?twitter\.com/[^\s\"'>]+",
@@ -418,16 +773,212 @@ def _extract_contact_info(html: str, text: str) -> Optional[Dict[str, Any]]:
         "youtube": r"https?://(?:www\.)?youtube\.com/[^\s\"'>]+",
         "telegram": r"https?://(?:t\.me|telegram\.me)/[^\s\"'>]+",
         "whatsapp": r"https?://wa\.me/[^\s\"'>]+",
+        "tiktok": r"https?://(?:www\.)?tiktok\.com/[^\s\"'>]+",
+        "xing": r"https?://(?:www\.)?xing\.com/[^\s\"'>]+",
+        "pinterest": r"https?://(?:www\.)?pinterest\.[^\s\"'>]+",
     }
-    social_found: Dict[str, List[str]] = {}
-    for platform, patt in social_patterns.items():
-        matches = re.findall(patt, html, flags=re.I)
-        if matches:
-            social_found[platform] = sorted(set(matches))
-    if social_found:
-        contact_info["social_media"] = social_found
+    found: Dict[str, List[str]] = {}
+    try:
+        # use BeautifulSoup to prefer hrefs
+        soup = BeautifulSoup(html or "", "lxml")
+        for a in soup.find_all("a", href=True):
+            href = a.get("href") or ""
+            for platform, patt in social_patterns.items():
+                if re.search(patt, href, flags=re.I):
+                    found.setdefault(platform, []).append(href.strip())
+        # fallback to regex on raw html for any missed
+        raw = html or ""
+        for platform, patt in social_patterns.items():
+            matches = re.findall(patt, raw, flags=re.I)
+            if matches:
+                existing = found.get(platform, [])
+                for m in matches:
+                    if m not in existing:
+                        existing.append(m)
+                if existing:
+                    found[platform] = sorted(set(existing))
+    except Exception:
+        # final fallback to regex only
+        raw = html or ""
+        for platform, patt in social_patterns.items():
+            matches = re.findall(patt, raw, flags=re.I)
+            if matches:
+                found[platform] = sorted(set(matches))
+    return {k: v for k, v in found.items() if v}
 
-    return contact_info if contact_info else None
+
+def _extract_contact_info(html: str, text: str, url: str, trafi: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extract contact info from the HTML blob and visible text.
+    Returns a dict with keys:
+      - emails: [str]            (optional)
+      - phones: [str]            (optional)  (normalized to E.164 where possible)
+      - faxes: [str]             (optional)  (normalized to E.164 where possible)
+      - social_media: {platform: [str]}  (optional)
+      - addresses: [ {streetAddress, addressLocality, addressRegion, postalCode, addressCountry, raw} ] or [{ "raw": "..."}]
+    Returns None if nothing found.
+    """
+    contact_info: Dict[str, Any] = {}
+
+    # --- Emails ---
+    try:
+        emails = set(re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", html))
+        # also scan mailto:
+        try:
+            soup = BeautifulSoup(html or "", "lxml")
+            for a in soup.find_all("a", href=True):
+                href = a.get("href") or ""
+                if href.lower().startswith("mailto:"):
+                    addr = href.split(":", 1)[1].split("?")[0].strip()
+                    if addr:
+                        emails.add(addr)
+        except Exception:
+            pass
+        if emails:
+            contact_info["emails"] = sorted(emails)
+    except Exception:
+        pass
+
+    # --- Social media ---
+    try:
+        social_found = _extract_social_media(html)
+        if social_found:
+            contact_info["social_media"] = social_found
+    except Exception:
+        pass
+
+    # --- Phones & Faxes (gather candidates from multiple sources) ---
+    phone_candidates = set()
+    try:
+        # 1) tel: links
+        try:
+            soup = BeautifulSoup(html or "", "lxml")
+            for a in soup.find_all("a", href=True):
+                href = (a.get("href") or "").strip()
+                if href.lower().startswith("tel:"):
+                    phone_candidates.add(href.split(":", 1)[1])
+        except Exception:
+            pass
+
+        # 2) JSON-LD telephone fields
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or "", flags=re.I | re.S):
+            try:
+                data = json.loads(m.group(1))
+            except Exception:
+                continue
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict):
+                    # common keys: telephone, faxNumber, contactPoint
+                    tel = item.get("telephone") or item.get("phone") or item.get("contactTelephone")
+                    if isinstance(tel, str) and tel.strip():
+                        phone_candidates.add(tel.strip())
+                    fax = item.get("faxNumber")
+                    if isinstance(fax, str) and fax.strip():
+                        phone_candidates.add(fax.strip())
+                    # contactPoint array/dict
+                    cp = item.get("contactPoint")
+                    if isinstance(cp, list):
+                        for c in cp:
+                            if isinstance(c, dict):
+                                t = c.get("telephone") or c.get("phone")
+                                f = c.get("faxNumber")
+                                if isinstance(t, str) and t.strip():
+                                    phone_candidates.add(t.strip())
+                                if isinstance(f, str) and f.strip():
+                                    phone_candidates.add(f.strip())
+                    elif isinstance(cp, dict):
+                        t = cp.get("telephone") or cp.get("phone")
+                        f = cp.get("faxNumber")
+                        if isinstance(t, str) and t.strip():
+                            phone_candidates.add(t.strip())
+                        if isinstance(f, str) and f.strip():
+                            phone_candidates.add(f.strip())
+        # 3) plain-text regex in HTML and visible text
+        phone_candidates.update(re.findall(r"(?:\+?\d[\d\-\s().]{6,}\d)", html))
+        phone_candidates.update(re.findall(r"(?:\+?\d[\d\-\s().]{6,}\d)", text))
+        # 4) surrounding 'fax' heuristics captured separately below
+    except Exception:
+        pass
+
+    # 4) fax patterns (look for 'fax' nearby)
+    fax_candidates = set()
+    try:
+        for match in re.finditer(r"(fax[:\s]*)([\+\d][\d\-\s().]{6,}\d)", html, flags=re.I):
+            raw = match.group(2)
+            fax_candidates.add(raw.strip())
+    except Exception:
+        pass
+
+    # Normalize phones and separate fax if labeled or matched above
+    phones_out: List[str] = []
+    faxes_out: List[str] = []
+
+    region_hint = _guess_country_from_html_url(html, url, trafi)  # e.g. 'US', 'DE', or None
+
+    # If region_hint is like 'GB' phonenumbers expects 'GB' (OK). phonenumbers.parse uses region as ISO 3166-1 alpha-2
+    for cand in sorted(phone_candidates):
+        formatted = _format_e164(cand, region_hint)
+        if formatted:
+            phones_out.append(formatted)
+        else:
+            # fallback: include cleaned digits if no E.164 possible
+            digits = re.sub(r"[^\d+]", "", cand)
+            if digits:
+                phones_out.append(digits)
+
+    for cand in sorted(fax_candidates):
+        formatted = _format_e164(cand, region_hint)
+        if formatted:
+            faxes_out.append(formatted)
+        else:
+            digits = re.sub(r"[^\d+]", "", cand)
+            if digits:
+                faxes_out.append(digits)
+
+    # Deduplicate
+    if phones_out:
+        contact_info["phones"] = sorted(list(dict.fromkeys(phones_out)))
+    if faxes_out:
+        # If a fax candidate appears in phones, prefer it in faxes too but keep distinct lists
+        contact_info["faxes"] = sorted(list(dict.fromkeys(faxes_out)))
+
+    # --- Addresses ---
+    addresses: List[Dict[str, Any]] = []
+    try:
+        # JSON-LD structured addresses
+        addresses.extend(_extract_addresses_from_jsonld(html))
+    except Exception:
+        pass
+
+    try:
+        # <address> tags and heuristics
+        addresses.extend(_extract_addresses_from_tags_and_text(html))
+    except Exception:
+        pass
+
+    # Deduplicate addresses by raw field
+    if addresses:
+        seen_raw = set()
+        uniq_addr = []
+        for a in addresses:
+            r = a.get("raw") or ""
+            r_norm = _normalize_whitespace(r).lower() if r else ""
+            if r_norm and r_norm not in seen_raw:
+                seen_raw.add(r_norm)
+                # ensure keys present as requested
+                cleaned = {}
+                for key in ("streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry"):
+                    if a.get(key):
+                        cleaned[key] = a.get(key)
+                cleaned["raw"] = a.get("raw")
+                uniq_addr.append(cleaned)
+        if uniq_addr:
+            contact_info["addresses"] = uniq_addr
+
+    if not contact_info:
+        return None
+    return contact_info
 
 
 # -------------------- Main extract endpoint --------------------
@@ -505,9 +1056,9 @@ async def extract_endpoint(payload: ExtractRequest):
     languages_list, lang_meta = _extract_languages(html, text_content, data)
     languages = languages_list or None
 
-    # contact info
+    # contact info (now enhanced)
     try:
-        contact_us = _extract_contact_info(html, text_content)
+        contact_us = _extract_contact_info(html, text_content, str(payload.url), data)
     except Exception:
         logger.exception("Contact extraction failed")
         contact_us = None
@@ -573,4 +1124,3 @@ async def extract_endpoint(payload: ExtractRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("extractor.app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), log_level="info")
-

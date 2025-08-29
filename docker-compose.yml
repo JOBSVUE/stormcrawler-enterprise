@@ -129,11 +129,16 @@ services:
     image: digitalpebble/storm_maven:2.7.0
     container_name: runner
     depends_on:
-      - nimbus
-      - elasticsearch
-      - oracle-test
-      - extractor
-      - js-renderer
+      nimbus:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+      oracle-test:
+        condition: service_healthy
+      extractor:
+        condition: service_healthy
+      js-renderer:
+        condition: service_healthy
     environment:
       - MAVEN_REPO_LOCAL=/crawldata/.repository
       # Oracle connection credentials as environment variables
@@ -180,6 +185,12 @@ services:
     restart: always
     depends_on:
       - extractor
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # ------------------------
   # Frontier (if you still need it)
@@ -195,7 +206,6 @@ services:
 
 volumes:
   oracle-data:
-  es-data:
   storm-ui-logs:
   storm-nimbus-logs:
   storm-supervisor-logs:
