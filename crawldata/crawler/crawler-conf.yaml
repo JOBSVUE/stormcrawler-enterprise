@@ -40,7 +40,7 @@ topology.debug: true
 fetcher.threads.number: 10
 fetcher.server.delay: 2.0
 http.timeout: 10000
-http.content.limit: 65536
+http.content.limit: 5242880  # 5 MB to avoid truncating sitemap XML
 
 # Metadata keys to carry across bolts
 metadata.persist:
@@ -48,9 +48,11 @@ metadata.persist:
   - depth
 metadata.track.depth: true
 # Force depth 0 (seeds only)
-spout.max.depth: 0
+spout.max.depth: 2
 parser.emitOutlinks: false
-# parser.emitOutlinks.max.per.page: 200  # ignored when emitOutlinks=false
+
+# Enable robots-based sitemap discovery
+sitemap.discovery: true
 
 # HTTP agent metadata
 http.agent.name:        "oracle-crawler"
@@ -101,7 +103,5 @@ urlfilters:
 
 # External extractor (FastAPI/trafilatura)
 extractor.service.url: "http://extractor:8000/extract"
-extractor.timeout.ms: 15000
-extractor.min.extracted.chars: 50
 extractor.timeout.ms: 15000
 extractor.min.extracted.chars: 50

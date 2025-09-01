@@ -49,16 +49,17 @@ config:
   indexer.text.fieldname: "text"
   indexer.md.mapping:
     - parse.title=title
-    - parse.description=description
+    - seo_description=description
     - parse.keywords=keywords
     - parse.author=author
     - parse.publishedDate=publishedDate
     - parse.lastModified=lastModified
     - canonical=canonical
     - company_id=company_id
-    - seo_description=seo_description
     - languages=languages
-    - contents=contents
+    - document_id=document_id
+    - extraction_metadata=extraction_metadata
+    - contact_us=contact_us
   
   # Connection settings
   es.client.connection.timeout: 10000
@@ -135,28 +136,32 @@ streams:
     to: "sitemap"
     grouping:
       type: LOCAL_OR_SHUFFLE
+
+  # New: Fetcher -> parse
   - from: "fetcher"
-    to: "extractor"
+    to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
   # Extractor -> parse; Sitemap -> parse
-  - from: "extractor"
-    to: "parse"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
   - from: "sitemap"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Parse -> index
+  # New: Parse -> extractor
   - from: "parse"
+    to: "extractor"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # New: Extractor -> index
+  - from: "extractor"
     to: "index"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Status side-streams
+  # Status side-streams (deduplicated)
   - from: "fetcher"
     to: "status"
     grouping:
@@ -172,25 +177,6 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
-  - from: "index"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-
-  - from: "index"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-      
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-
   - from: "index"
     to: "status"
     grouping:

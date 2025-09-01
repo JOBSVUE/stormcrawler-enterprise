@@ -135,28 +135,32 @@ streams:
     to: "sitemap"
     grouping:
       type: LOCAL_OR_SHUFFLE
+
+  # New: Fetcher -> parse
   - from: "fetcher"
-    to: "extractor"
+    to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
   # Extractor -> parse; Sitemap -> parse
-  - from: "extractor"
-    to: "parse"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
   - from: "sitemap"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Parse -> index
+  # New: Parse -> extractor
   - from: "parse"
+    to: "extractor"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # New: Extractor -> index
+  - from: "extractor"
     to: "index"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Status side-streams
+  # Status side-streams (deduplicated)
   - from: "fetcher"
     to: "status"
     grouping:
@@ -172,25 +176,6 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
       streamId: "status"
-  - from: "index"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-
-  - from: "index"
-    to: "status"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-      
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-      streamId: "status"
-
   - from: "index"
     to: "status"
     grouping:

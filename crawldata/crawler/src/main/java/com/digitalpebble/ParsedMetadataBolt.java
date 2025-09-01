@@ -84,60 +84,8 @@ public class ParsedMetadataBolt extends BaseRichBolt {
             return;
         }
 
-        String html = readHtml(tuple, metadata);
-        if (html == null || html.isEmpty()) {
-            LOG.debug("Empty HTML for URL {}, passing through", url);
-            metadata.addValue("extraction.method", "fallback");
-            metadata.addValue("extraction.reason", "empty_html");
-            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
-            collector.ack(tuple);
-            return;
-        }
-
-        // Record input info
-        String ctype = firstNonEmpty(
-                metadata.getFirstValue("Content-Type"),
-                metadata.getFirstValue("parse.Content-Type"),
-                metadata.getFirstValue("http.content.type"));
-        if (ctype != null) metadata.addValue("extraction.input.contentType", ctype);
-
-        // Skip non-HTML content (e.g., PDFs, images)
-        if (ctype != null && !ctype.toLowerCase().contains("html") && !ctype.toLowerCase().contains("xml")) {
-            metadata.addValue("extraction.method", "fallback");
-            metadata.addValue("extraction.reason", "non_html_content");
-            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
-            collector.ack(tuple);
-            return;
-        }
-
-        // Basic heuristic: ensure it's likely HTML
-        boolean looksHtml = html.indexOf('<') >= 0; // cheap check
-        if (!looksHtml) {
-            metadata.addValue("extraction.method", "fallback");
-            metadata.addValue("extraction.reason", "content_not_html_like");
-            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
-            collector.ack(tuple);
-            return;
-        }
-
-        // Sanitize NULs/control that may break JSON parsers
-        if (html.indexOf('\u0000') >= 0) {
-            html = html.replace("\u0000", "");
-        }
-
-        // Cap very large HTML payloads to avoid 400 from extractor
-        boolean truncated = false;
-        if (html.length() > maxHtmlChars) {
-            html = html.substring(0, maxHtmlChars);
-            truncated = true;
-        }
-        metadata.addValue("extraction.input.length", Integer.toString(html.length()));
-        if (truncated) {
-            metadata.addValue("extraction.truncated", "true");
-        }
-
         try {
-            // If renderer chain is set, call it with just the URL, letting the service render + extract.
+            // Try renderer first, even if we don't have HTML (works with URL-only).
             if (rendererUrl != null && !rendererUrl.isBlank()) {
                 String payload = buildRendererPayload(url, metadata);
                 HttpRequest req = HttpRequest.newBuilder(URI.create(rendererUrl))
@@ -155,64 +103,136 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                     String title = textOrNull(root, "title");
                     String seoDesc = textOrNull(root, "seo_description");
                     String companyId = textOrNull(root, "company_id");
-                    if (companyId == null || companyId.isBlank()) companyId = url;
-                    if (companyId != null) metadata.addValue("company_id", companyId);
-                    if (seoDesc != null && !seoDesc.isBlank()) {
-                        metadata.addValue("seo_description", seoDesc);
-                        // removed: do not also copy to parse.description (mapping handles unification)
-                        // metadata.addValue("parse.description", seoDesc);
+
+                    // NEW: forward stable IDs and blobs if absent
+                    JsonNode docId = root.get("document_id");
+                    if (docId != null && metadata.getFirstValue("document_id") == null) {
+                        metadata.addValue("document_id", docId.asText());
                     }
-                    // NEW: keywords array -> parse.keywords
+                    JsonNode em = root.get("extraction_metadata");
+                    if (em != null && metadata.getFirstValue("extraction_metadata") == null) {
+                        try { metadata.addValue("extraction_metadata", mapper.writeValueAsString(em)); } catch (Exception ignore) {}
+                    }
+                    JsonNode cu = root.get("contact_us");
+                    if (cu != null && metadata.getFirstValue("contact_us") == null) {
+                        try { metadata.addValue("contact_us", mapper.writeValueAsString(cu)); } catch (Exception ignore) {}
+                    }
+
+                    // Avoid duplicates: set/skip if already present
+                    if (companyId == null || companyId.isBlank()) companyId = url;
+                    if (companyId != null && metadata.getFirstValue("company_id") == null) {
+                        metadata.addValue("company_id", companyId);
+                    }
+                    if (seoDesc != null && !seoDesc.isBlank() && metadata.getFirstValue("seo_description") == null) {
+                        metadata.addValue("seo_description", seoDesc);
+                    }
+                    // keywords: only add if no keywords exist already
                     JsonNode kws = root.get("keywords");
-                    if (kws != null && kws.isArray()) {
+                    if (kws != null && kws.isArray() && metadata.getFirstValue("parse.keywords") == null) {
                         for (JsonNode kn : kws) {
                             String kw = kn != null ? kn.asText(null) : null;
                             if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
                         }
                     }
-                    // NEW: languages array -> languages
+                    // languages: only add if no languages exist already
                     JsonNode langs = root.get("languages");
-                    if (langs != null && langs.isArray()) {
+                    if (langs != null && langs.isArray() && metadata.getFirstValue("languages") == null) {
                         for (JsonNode ln : langs) {
                             String lc = ln != null ? ln.asText(null) : null;
                             if (lc != null && !lc.isBlank()) metadata.addValue("languages", lc);
                         }
                     }
                     if (content != null && content.length() >= minChars) {
-                        byte[] extractedBytes = content.getBytes(detectCharset(metadata));
-                        if (title != null && !title.isBlank()) {
+                        if (title != null && !title.isBlank() && metadata.getFirstValue("parse.title") == null) {
                             metadata.addValue("parse.title", title);
                         }
-                        // removed to avoid duplication with ES 'text' field
-                        // metadata.addValue("contents", content);
+                        // ...existing emit/ack...
                         metadata.addValue("extraction.method", "renderer+trafilatura");
                         metadata.addValue("extraction.length", Integer.toString(content.length()));
                         metadata.addValue("extraction.status", "200");
-                        collector.emit(tuple, new Values(url, extractedBytes, metadata));
+                        collector.emit(tuple, new Values(url, content, metadata));
                     } else {
-                        LOG.debug("Renderer chain returned too-short/empty content for URL {}", url);
+                        // ...existing fallback passthrough...
                         metadata.addValue("extraction.method", "fallback");
                         metadata.addValue("extraction.reason", "too_short_or_empty");
                         metadata.addValue("extraction.status", "200");
-                        collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+                        String passthrough = safeGetText(tuple, metadata);
+                        collector.emit(tuple, new Values(url, passthrough, metadata));
                     }
                     collector.ack(tuple);
                     return;
                 } else if (code == 204) {
-                    LOG.debug("Renderer chain 204 No Content for URL {}", url);
+                    // pass-through existing text if any
                     metadata.addValue("extraction.method", "fallback");
                     metadata.addValue("extraction.reason", "http_204");
                     metadata.addValue("extraction.status", "204");
-                    collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+                    String passthrough = safeGetText(tuple, metadata);
+                    collector.emit(tuple, new Values(url, passthrough, metadata));
                     collector.ack(tuple);
                     return;
                 } else {
                     LOG.warn("Renderer chain HTTP {} for URL {}. Body: {}", code, url, resp.body());
-                    // fall through to extractor fallback
+                    // fall through to extractor / passthrough
                 }
             }
+        } catch (Exception e) {
+            LOG.warn("Renderer call failed for URL {}: {}", url, e.toString());
+            // fall through to extractor / passthrough
+        }
 
-            // Fallback: call extractor directly with already-fetched HTML
+        // From here on, only use extractor if HTML is available; otherwise pass-through.
+        String html = readHtml(tuple, metadata);
+
+        if (html == null || html.isEmpty()) {
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "empty_html");
+            String passthrough = safeGetText(tuple, metadata);
+            collector.emit(tuple, new Values(url, passthrough, metadata));
+            collector.ack(tuple);
+            return;
+        }
+
+        // Record input info and basic checks for extractor path
+        String ctype = firstNonEmpty(
+                metadata.getFirstValue("Content-Type"),
+                metadata.getFirstValue("parse.Content-Type"),
+                metadata.getFirstValue("http.content.type"));
+        if (ctype != null) metadata.addValue("extraction.input.contentType", ctype);
+
+        boolean looksHtml = html.indexOf('<') >= 0;
+        if (ctype != null && !ctype.toLowerCase().contains("html") && !ctype.toLowerCase().contains("xml")) {
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "non_html_content");
+            // CHANGED: emit String text instead of raw 'content' field
+            String passthrough = safeGetText(tuple, metadata);
+            collector.emit(tuple, new Values(url, passthrough, metadata));
+            collector.ack(tuple);
+            return;
+        }
+        if (!looksHtml) {
+            metadata.addValue("extraction.method", "fallback");
+            metadata.addValue("extraction.reason", "content_not_html_like");
+            // CHANGED: emit String text instead of raw 'content' field
+            String passthrough = safeGetText(tuple, metadata);
+            collector.emit(tuple, new Values(url, passthrough, metadata));
+            collector.ack(tuple);
+            return;
+        }
+
+        if (html.indexOf('\u0000') >= 0) {
+            html = html.replace("\u0000", "");
+        }
+
+        boolean truncated = false;
+        if (html.length() > maxHtmlChars) {
+            html = html.substring(0, maxHtmlChars);
+            truncated = true;
+        }
+        metadata.addValue("extraction.input.length", Integer.toString(html.length()));
+        if (truncated) metadata.addValue("extraction.truncated", "true");
+
+        try {
+            // Fallback: call extractor with HTML (only if HTML is available, as above)
             String payload = toJsonPayload(url, html, metadata);
             HttpRequest req = HttpRequest.newBuilder(URI.create(extractorUrl))
                     .timeout(Duration.ofMillis(timeoutMs))
@@ -229,73 +249,88 @@ public class ParsedMetadataBolt extends BaseRichBolt {
                 String title = textOrNull(root, "title");
                 String seoDesc = textOrNull(root, "seo_description");
                 String companyId = textOrNull(root, "company_id");
-                if (companyId == null || companyId.isBlank()) companyId = url;
-                if (companyId != null) metadata.addValue("company_id", companyId);
-                if (seoDesc != null && !seoDesc.isBlank()) {
-                    metadata.addValue("seo_description", seoDesc);
-                    // removed: do not also copy to parse.description (mapping handles unification)
-                    // metadata.addValue("parse.description", seoDesc);
+
+                // NEW: forward stable IDs and blobs if absent
+                JsonNode docId = root.get("document_id");
+                if (docId != null && metadata.getFirstValue("document_id") == null) {
+                    metadata.addValue("document_id", docId.asText());
                 }
-                // NEW: keywords array -> parse.keywords
+                JsonNode em = root.get("extraction_metadata");
+                if (em != null && metadata.getFirstValue("extraction_metadata") == null) {
+                    try { metadata.addValue("extraction_metadata", mapper.writeValueAsString(em)); } catch (Exception ignore) {}
+                }
+                JsonNode cu = root.get("contact_us");
+                if (cu != null && metadata.getFirstValue("contact_us") == null) {
+                    try { metadata.addValue("contact_us", mapper.writeValueAsString(cu)); } catch (Exception ignore) {}
+                }
+
+                if (companyId == null || companyId.isBlank()) companyId = url;
+                if (companyId != null && metadata.getFirstValue("company_id") == null) {
+                    metadata.addValue("company_id", companyId);
+                }
+                if (seoDesc != null && !seoDesc.isBlank() && metadata.getFirstValue("seo_description") == null) {
+                    metadata.addValue("seo_description", seoDesc);
+                }
+                // keywords: only add if none exist
                 JsonNode kws = root.get("keywords");
-                if (kws != null && kws.isArray()) {
+                if (kws != null && kws.isArray() && metadata.getFirstValue("parse.keywords") == null) {
                     for (JsonNode kn : kws) {
                         String kw = kn != null ? kn.asText(null) : null;
                         if (kw != null && !kw.isBlank()) metadata.addValue("parse.keywords", kw);
                     }
                 }
-                // NEW: languages array -> languages
+                // languages: only add if none exist
                 JsonNode langs = root.get("languages");
-                if (langs != null && langs.isArray()) {
+                if (langs != null && langs.isArray() && metadata.getFirstValue("languages") == null) {
                     for (JsonNode ln : langs) {
                         String lc = ln != null ? ln.asText(null) : null;
                         if (lc != null && !lc.isBlank()) metadata.addValue("languages", lc);
                     }
                 }
                 if (content != null && content.length() >= minChars) {
-                    byte[] extractedBytes = content.getBytes(detectCharset(metadata));
-                    if (title != null && !title.isBlank()) {
+                    if (title != null && !title.isBlank() && metadata.getFirstValue("parse.title") == null) {
                         metadata.addValue("parse.title", title);
                     }
-                    // removed to avoid duplication with ES 'text' field
-                    // metadata.addValue("contents", content);
+                    // ...existing emit...
                     metadata.addValue("extraction.method", "trafilatura");
                     metadata.addValue("extraction.length", Integer.toString(content.length()));
                     metadata.addValue("extraction.status", "200");
-                    collector.emit(tuple, new Values(url, extractedBytes, metadata));
+                    collector.emit(tuple, new Values(url, content, metadata));
                 } else {
-                    LOG.debug("Extractor returned too-short/empty content for URL {}", url);
+                    // ...existing fallback...
                     metadata.addValue("extraction.method", "fallback");
                     metadata.addValue("extraction.reason", "too_short_or_empty");
                     metadata.addValue("extraction.status", "200");
-                    collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+                    String passthrough = safeGetText(tuple, metadata);
+                    collector.emit(tuple, new Values(url, passthrough, metadata));
                 }
             } else if (code == 204) {
-                LOG.debug("Extractor 204 No Content for URL {}", url);
                 metadata.addValue("extraction.method", "fallback");
                 metadata.addValue("extraction.reason", "http_204");
                 metadata.addValue("extraction.status", "204");
-                collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+                String passthrough = safeGetText(tuple, metadata);
+                collector.emit(tuple, new Values(url, passthrough, metadata));
             } else {
-                LOG.warn("Extractor HTTP {} for URL {}. Body: {}", code, url, resp.body());
                 metadata.addValue("extraction.method", "fallback");
                 metadata.addValue("extraction.reason", "http_" + code);
                 metadata.addValue("extraction.status", Integer.toString(code));
-                collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+                String passthrough = safeGetText(tuple, metadata);
+                collector.emit(tuple, new Values(url, passthrough, metadata));
             }
             collector.ack(tuple);
         } catch (Exception e) {
             LOG.warn("Extractor call failed for URL {}: {}", url, e.toString());
             metadata.addValue("extraction.method", "fallback");
             metadata.addValue("extraction.reason", "exception");
-            collector.emit(tuple, new Values(url, tuple.getValueByField("content"), metadata));
+            String passthrough = safeGetText(tuple, metadata);
+            collector.emit(tuple, new Values(url, passthrough, metadata));
             collector.ack(tuple);
         }
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("url", "content", "metadata"));
+        declarer.declare(new Fields("url", "text", "metadata"));
     }
 
     /**
@@ -491,5 +526,30 @@ public class ParsedMetadataBolt extends BaseRichBolt {
             LOG.debug("Failed to build renderer JSON payload, falling back: {}", e.toString());
             return "{\"url\":\"" + escape(url) + "\"}";
         }
+    }
+
+    /**
+     * Try to get a text String from tuple; fall back to decoding content bytes; last resort empty string.
+     */
+    private static String safeGetText(Tuple t, Metadata md) {
+        try {
+            int ti = t.fieldIndex("text");
+            if (ti >= 0) {
+                Object v = t.getValue(ti);
+                if (v instanceof String) return (String) v;
+            }
+        } catch (Exception ignored) {}
+        try {
+            int ci = t.fieldIndex("content");
+            if (ci >= 0) {
+                Object v = t.getValue(ci);
+                if (v instanceof byte[]) {
+                    return new String((byte[]) v, detectCharset(md));
+                } else if (v instanceof String) {
+                    return (String) v;
+                }
+            }
+        } catch (Exception ignored) {}
+        return "";
     }
 }

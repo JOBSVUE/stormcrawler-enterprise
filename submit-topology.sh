@@ -24,7 +24,31 @@ fi
 
 # 3) Clean and build the project
 echo "Building project..."
-mvn clean package -DskipTests
+# Optional: skip rebuild if SKIP_BUILD=1 is set and a jar is present
+SKIP_BUILD="${SKIP_BUILD:-0}"
+build_start_ts=$(date +%s)
+if [ "$SKIP_BUILD" != "1" ]; then
+  mvn clean package -DskipTests
+else
+  echo "SKIP_BUILD=1 -> skipping Maven build"
+fi
+build_end_ts=$(date +%s)
+
+# Resolve the most recent shaded jar dynamically
+resolve_jar() {
+  ls -1t target/*-SNAPSHOT.jar target/*.jar 2>/dev/null | head -n1 || true
+}
+JAR_PATH="$(resolve_jar)"
+if [ -z "${JAR_PATH}" ]; then
+  echo "No JAR found in target/. Forcing a build..."
+  mvn clean package -DskipTests
+  JAR_PATH="$(resolve_jar)"
+fi
+if [ -z "${JAR_PATH}" ]; then
+  echo "ERROR: Could not find a jar in target/ after build." >&2
+  exit 1
+fi
+echo "Using JAR: ${JAR_PATH}"
 
 # 4) Set environment variables for DB connection
 export JDBC_URL="jdbc:oracle:thin:@//oracle-test:1521/XE"
@@ -54,14 +78,17 @@ wait_for_port js-renderer 8001 "JS Renderer"
 echo "Submitting topology to Storm…"
 max_retries=3
 retry_count=0
+sleep_backoff=5  # exponential backoff start (seconds), doubled per retry (max 60s)
 
-# Allow runtime override of crawl depth (default 1 to index sitemap URLs)
-SPOUT_MAX_DEPTH="${SPOUT_MAX_DEPTH:-1}"
+# Allow runtime override of crawl depth (default 2 to include sitemap URLs)
+SPOUT_MAX_DEPTH="${SPOUT_MAX_DEPTH:-2}"
 
+submit_start_ts=$(date +%s)
 until storm jar \
-    target/stormcrawler-digitalpebble-1.0-SNAPSHOT.jar \
+    "${JAR_PATH}" \
     org.apache.storm.flux.Flux \
     --remote \
+    -c topology.name="${TOPOLOGY_NAME}" \
     -c sql.connection.string="${JDBC_URL}" \
     -c sql.user="${JDBC_USER}" \
     -c sql.password="${JDBC_PASS}" \
@@ -74,9 +101,14 @@ do
     echo "ERROR: Topology submission failed after $max_retries attempts." >&2
     exit 1
   fi
-  echo "Submission failed; retrying in 10 seconds (attempt $retry_count/$max_retries)…" >&2
-  sleep 10
+  echo "Submission failed; retrying in ${sleep_backoff}s (attempt $retry_count/$max_retries)…" >&2
+  sleep "${sleep_backoff}"
+  # Exponential backoff with cap
+  sleep_backoff=$(( sleep_backoff * 2 ))
+  if [ "${sleep_backoff}" -gt 60 ]; then sleep_backoff=60; fi
 done
+submit_end_ts=$(date +%s)
 
+echo "Build time: $((build_end_ts - build_start_ts))s; Submission time: $((submit_end_ts - submit_start_ts))s"
 echo "==== TOPOLOGY SUBMITTED SUCCESSFULLY ===="
 echo "You can now check the Storm UI at http://localhost:8080"

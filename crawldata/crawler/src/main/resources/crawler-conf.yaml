@@ -10,7 +10,7 @@ config:
 
   # General StormCrawler settings - DISABLE emitting outlinks
   parser.emitOutlinks: false
-  # Keep crawl at depth 0 (no link expansion)
+  # Keep crawl depth limited (allow sitemap URLs)
   spout.max.depth: 2  # allow sitemap URLs (>0) to be enqueued/fetched
   urlfilter.refreshConfigurationInBolt: true
   
@@ -27,6 +27,7 @@ config:
   fetcher.threads.number: 10
   fetcher.threads.per.queue: 1
   fetcherbolt.queue.debug.name: "fetcher-queue-debug"
+  http.content.limit: 5242880  # 5 MB to prevent truncating large sitemaps
 
   # Parsing behavior - capture everything
   jsoup.treat.non.html.as.error: false
@@ -43,7 +44,8 @@ config:
   status.updater.cache.spec: "maximumSize=10000,expireAfterAccess=1h"
 
   # Elasticsearch specific configuration 
-  es.indexer.addresses: "elasticsearch:9200"
+  es.indexer.addresses:
+    - "http://elasticsearch:9200"
   es.status.addresses: "elasticsearch:9200"
   es.status.index.name: "status"
   es.status.doc.type: "status"
@@ -89,6 +91,8 @@ config:
   # Status retry / backoff (consumed by SQLStatusUpdaterBolt)
   status.fetch.delay.mins: 1440
   status.error.retry.mins: 30
+  # Ensure nextFetchDate rounding does not delay reselection of newly DISCOVERED URLs
+  status.updater.unit.round.date: "SECONDS"
   # Spout tuning overrides (optional)
   spout.fetch.batch: 80
   spout.min.queue.size: 15
@@ -100,17 +104,17 @@ config:
   indexer.text.fieldname: "text"
   indexer.md.mapping:
     - parse.title=title
-    - parse.description=description
+    - seo_description=description
     - parse.keywords=keywords
     - parse.author=author
     - parse.publishedDate=publishedDate
     - parse.lastModified=lastModified
     - canonical=canonical
-    # unify SEO desc into one ES field
-    - seo_description=description
-    # keep other custom fields
     - company_id=company_id
     - languages=languages
+    - document_id=document_id
+    - extraction_metadata=extraction_metadata
+    - contact_us=contact_us
 
   # External extractor (FastAPI/trafilatura) settings
   extractor.service.url: "http://extractor:8000/extract"
@@ -120,6 +124,4 @@ config:
 
   # JS renderer + extractor chain (preferred)
   renderer.service.url: "http://js-renderer:8001/render_and_extract"
-  renderer.timeout.ms: 30000
-  renderer.timeout.ms: 30000
   renderer.timeout.ms: 30000

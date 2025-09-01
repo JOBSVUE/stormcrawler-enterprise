@@ -74,17 +74,23 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Fetcher -> extractor (replace direct fetcher->parse)
+  # New: Fetcher -> parse (parse HTML before renderer/extractor)
   - from: "fetcher"
-    to: "extractor"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-
-  # Extractor -> parse
-  - from: "extractor"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
+
+  # Remove: fetcher -> extractor
+  # - from: "fetcher"
+  #   to: "extractor"
+  #   grouping:
+  #     type: LOCAL_OR_SHUFFLE
+
+  # Remove: extractor -> parse
+  # - from: "extractor"
+  #   to: "parse"
+  #   grouping:
+  #     type: LOCAL_OR_SHUFFLE
 
   # Sitemap -> parse
   - from: "sitemap"
@@ -92,11 +98,23 @@ streams:
     grouping:
       type: LOCAL_OR_SHUFFLE
 
-  # Parse -> indexer
+  # New: Parse -> extractor (renderer/extractor enriches after parsing)
   - from: "parse"
+    to: "extractor"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  # New: Extractor -> indexer (extractor produces final text for indexing)
+  - from: "extractor"
     to: "indexer"
     grouping:
       type: LOCAL_OR_SHUFFLE
+
+  # Remove: Parse -> indexer
+  # - from: "parse"
+  #   to: "indexer"
+  #   grouping:
+  #     type: LOCAL_OR_SHUFFLE
 
   # Status side-streams
   - from: "fetcher"

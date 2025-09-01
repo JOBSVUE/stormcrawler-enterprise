@@ -132,12 +132,17 @@ streams:
       type: LOCAL_OR_SHUFFLE
 
   - from: "fetcher"
+    to: "parse"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+
+  - from: "parse"
     to: "extractor"
     grouping:
       type: LOCAL_OR_SHUFFLE
 
   - from: "extractor"
-    to: "parse"
+    to: "index"
     grouping:
       type: LOCAL_OR_SHUFFLE
 

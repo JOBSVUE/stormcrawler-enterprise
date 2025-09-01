@@ -1,7 +1,6 @@
 # StormCrawler Example
 
 This is a complete web crawler application built with StormCrawler and Elasticsearch integration.
-GitHub Copilot
 
 # Important:
 Seeds are the starting URLs of a crawl.
@@ -154,10 +153,10 @@ flowchart TD
 
   Spout[SimpleOracleSpout\n(reads NEW/DISCOVERED)] --> Fetcher[FetcherBolt]
   Fetcher -->|sitemaps| Sitemap[SiteMapParserBolt]
-  Fetcher --> Extractor[ParsedMetadataBolt\n(FastAPI/trafilatura)]
-  Sitemap --> Parse[JSoupParserBolt]
-  Extractor --> Parse
-  Parse --> Indexer[IndexerBolt]
+  Fetcher --> Parse[JSoupParserBolt]
+  Sitemap --> Parse
+  Parse --> Extractor[ParsedMetadataBolt\n(Renderer->Extractor)]
+  Extractor --> Indexer[IndexerBolt]
   Indexer --> ES
 
   %% Status side-streams
@@ -213,4 +212,5 @@ Notes:
   - Enforced by parser.emitOutlinks=false and spout.max.depth=0 (see crawler-conf.yaml).
   - HTML pages do not emit outlinks.
   - Sitemap URLs discovered by SiteMapParserBolt are still accepted and treated like seeds.
+- To enable deeper crawls: set parser.emitOutlinks=true and raise spout.max.depth accordingly.
 - To enable deeper crawls: set parser.emitOutlinks=true and raise spout.max.depth accordingly.
