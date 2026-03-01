@@ -91,7 +91,7 @@ services:
     environment:
       - STORM_OPTS=-Dlog4j2.formatMsgNoLookups=true
     ports:
-      - "8080:8080" # Updated to remove localhost binding for broader accessibility
+      - "8083:8080" # Updated to remove localhost binding for broader accessibility
     volumes:
       - storm-ui-logs:/logs
       - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/ui.log4j2.properties
@@ -108,7 +108,7 @@ services:
       - xpack.security.enabled=false
       - cluster.name=stormcrawler
     ports:
-      - "9200:9200"
+      - "9220:9200"
       - "9300:9300"
     volumes:
       - es_data:/usr/share/elasticsearch/data
@@ -164,7 +164,7 @@ services:
     environment:
       - PORT=8000
     ports:
-      - "8000:8000"   # optional, useful for manual checks
+      - "8101:8000"   # optional, useful for manual checks
     restart: always
 
   # ------------------------
