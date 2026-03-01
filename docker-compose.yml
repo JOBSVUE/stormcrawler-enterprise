@@ -192,17 +192,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # ------------------------
-  # Frontier (if you still need it)
-  # ------------------------
-  frontier:
-    image: crawlercommons/url-frontier
-    container_name: frontier
-    command: rocksdb.path=/crawldir/rocksdb
-    ports:
-      - "127.0.0.1:7071:7071"
-    volumes:
-      - ./frontier:/crawldir
+
 
 volumes:
   oracle-data:
