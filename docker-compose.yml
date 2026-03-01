@@ -126,7 +126,7 @@ services:
   # Storm "runner" for submitting topologies
   # ------------------------
   runner:
-    image: digitalpebble/storm_maven:2.7.0
+    image: storm:2.7.0
     container_name: runner
     depends_on:
       nimbus:
@@ -151,7 +151,7 @@ services:
       - ./crawldata:/crawldata
       - ./crawldata/crawler/src/main/resources/log4j2.properties:/apache-storm-2.7.0/conf/log4j2/worker.log4j2.properties
     command: >
-      bash -c "/crawldata/submit-topology.sh"
+        bash -c "apt-get update && apt-get install -y maven && /crawldata/submit-topology.sh"
 
   # ------------------------
   # Extractor (FastAPI / trafilatura)
